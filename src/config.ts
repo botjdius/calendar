@@ -32,14 +32,21 @@ export const isWebPushFirebaseConfigured = Boolean(
     webPushFirebaseConfig.appId
 );
 
+const DEFAULT_PUSH_URL = 'https://jyang-jyang-push.ludicrous-apatosaurus.workers.dev';
+const DEFAULT_VAPID_PUBLIC_KEY =
+  'BHdNPyXfLjYWB7kjsi41USPYNMfWoWUpvj9GNJKz65Eo4ma6WT6wfuuilgxnOCFtLLPaPg_Q4PMBaqVIqXhORk4';
+const DEFAULT_PUSH_GATE = '8dfd63bc8e02bb6069d9bcd2312fecb4';
+
 export const vapidPublicKey =
   process.env.EXPO_PUBLIC_VAPID_PUBLIC_KEY ||
   process.env.EXPO_PUBLIC_FCM_VAPID_KEY ||
   process.env.EXPO_PUBLIC_FIREBASE_VAPID_KEY ||
-  '';
+  DEFAULT_VAPID_PUBLIC_KEY;
 
-export const pushUrl = (process.env.EXPO_PUBLIC_PUSH_URL || '').replace(/\/$/, '');
-export const pushGate = process.env.EXPO_PUBLIC_PUSH_GATE || '';
+export const pushUrl = (
+  process.env.EXPO_PUBLIC_PUSH_URL || DEFAULT_PUSH_URL
+).replace(/\/$/, '');
+export const pushGate = process.env.EXPO_PUBLIC_PUSH_GATE || DEFAULT_PUSH_GATE;
 
 export const siteUrl = (
   process.env.EXPO_PUBLIC_SITE_URL ||

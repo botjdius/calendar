@@ -1,5 +1,4 @@
 import { createRequire } from 'node:module';
-import { appendEnv } from './env.mjs';
 
 const require = createRequire(import.meta.url);
 const webpush = require('web-push');
@@ -12,13 +11,7 @@ function ensureVapid() {
     process.env.VAPID_PUBLIC_KEY = process.env.EXPO_PUBLIC_VAPID_PUBLIC_KEY;
     return;
   }
-  const keys = webpush.generateVAPIDKeys();
-  appendEnv({
-    EXPO_PUBLIC_VAPID_PUBLIC_KEY: keys.publicKey,
-    VAPID_PUBLIC_KEY: keys.publicKey,
-    VAPID_PRIVATE_KEY: keys.privateKey,
-    VAPID_SUBJECT: process.env.VAPID_SUBJECT || 'https://jyangjyang.surge.sh',
-  });
+  // Keep the live Cloudflare VAPID keypair. Do not mint a new local key on another computer.
 }
 
 ensureVapid();
