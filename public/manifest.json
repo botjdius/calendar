@@ -1,0 +1,26 @@
+{
+  "short_name": "쟝쟝",
+  "name": "쟝쟝 · Jyang JyanG",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "type": "image/png",
+      "sizes": "180x180"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#F3EDE3",
+  "background_color": "#FFFFFF"
+}

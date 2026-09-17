@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "쟝쟝",
+    "slug": "jyang-jyang",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "jyangjyang",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F3EDE3"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.jyangjyang.app",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true
+        },
+        "NSLocalNetworkUsageDescription": "같은 와이파이의 맥 허브와 레슨 자료를 주고받기 위해 사용합니다."
+      }
+    },
+    "android": {
+      "package": "com.jyangjyang.app",
+      "usesCleartextTraffic": true,
+      "adaptiveIcon": {
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-document-picker"
+    ]
+  }
+}
