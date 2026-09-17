@@ -1,10 +1,11 @@
 name = "jyang-jyang-push"
 main = "src/index.js"
 compatibility_date = "2024-09-23"
+account_id = "2c2f2a2498d3137fd232a59b44c298c1"
 
 [vars]
 SITE = "https://jyangjyang.surge.sh"
-VAPID_SUBJECT = "mailto:jyang@localhost"
+VAPID_SUBJECT = "https://jyangjyang.surge.sh"
 VAPID_PUBLIC_KEY = "BHdNPyXfLjYWB7kjsi41USPYNMfWoWUpvj9GNJKz65Eo4ma6WT6wfuuilgxnOCFtLLPaPg_Q4PMBaqVIqXhORk4"
 RENTRY_ID = "jyangjyang-studio"
 CLOUD_URL = "https://extendsclass.com/api/json-storage/bin/ebefede"

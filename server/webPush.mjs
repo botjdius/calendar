@@ -17,7 +17,7 @@ function ensureVapid() {
     EXPO_PUBLIC_VAPID_PUBLIC_KEY: keys.publicKey,
     VAPID_PUBLIC_KEY: keys.publicKey,
     VAPID_PRIVATE_KEY: keys.privateKey,
-    VAPID_SUBJECT: process.env.VAPID_SUBJECT || 'mailto:jyang@localhost',
+    VAPID_SUBJECT: process.env.VAPID_SUBJECT || 'https://jyangjyang.surge.sh',
   });
 }
 
@@ -30,7 +30,7 @@ function vapidDetails() {
   return {
     publicKey,
     privateKey,
-    subject: process.env.VAPID_SUBJECT || 'mailto:jyang@localhost',
+    subject: process.env.VAPID_SUBJECT || 'https://jyangjyang.surge.sh',
   };
 }
 

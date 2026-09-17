@@ -2,21 +2,27 @@ import { buildPushPayload } from '@block65/webcrypto-web-push';
 
 const SITE = 'https://jyangjyang.surge.sh';
 
-function json(status, body, extra = {}) {
+function corsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Push-Gate',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Max-Age': '86400',
+  };
+}
+
+function json(status, body) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Content-Type, X-Push-Gate',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      ...extra,
+      ...corsHeaders(),
     },
   });
 }
 
 function cors() {
-  return json(204, {});
+  return new Response(null, { status: 204, headers: corsHeaders() });
 }
 
 function mergePushSubscriptions(current, incoming) {
@@ -78,25 +84,45 @@ function gateOk(env, req, body) {
   return header === expected || fromBody === expected;
 }
 
-async function fetchRentryJson(id) {
-  const res = await fetch(`https://rentry.co/api/fetch/${id}?t=${Date.now()}`);
-  if (!res.ok) return null;
-  const text = rentryText(await res.json());
-  if (!text) return null;
+async function fetchRentryStudio(env) {
+  const id = env.RENTRY_ID || 'jyangjyang-studio';
+  const code = env.RENTRY_CODE || 'jyangcloud';
   try {
+    const res = await fetch(`https://rentry.co/api/fetch/${id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `edit_code=${encodeURIComponent(code)}`,
+    });
+    if (!res.ok) return null;
+    const text = rentryText(await res.json());
+    if (!text) return null;
     return JSON.parse(text);
   } catch {
     return null;
   }
 }
 
+async function fetchExtendsclass(env) {
+  const url = env.CLOUD_URL || 'https://extendsclass.com/api/json-storage/bin/ebefede';
+  try {
+    const res = await fetch(`${url}?t=${Date.now()}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchStudio(env) {
-  return fetchRentryJson(env.RENTRY_ID || 'jyangjyang-studio');
+  const [ext, rentry] = await Promise.all([fetchExtendsclass(env), fetchRentryStudio(env)]);
+  if (ext && rentry) return (rentry.version || 0) >= (ext.version || 0) ? rentry : ext;
+  return ext || rentry;
 }
 
 async function fetchStudioSubs(env) {
-  const data = await fetchStudio(env);
-  return mergePushSubscriptions([], data?.pushSubscriptions);
+  const [ext, rentry] = await Promise.all([fetchExtendsclass(env), fetchRentryStudio(env)]);
+  return mergePushSubscriptions(ext?.pushSubscriptions, rentry?.pushSubscriptions);
 }
 
 async function loadKv(env) {
@@ -119,15 +145,15 @@ async function writeStudioSubs(env, list) {
   const studio = await fetchStudio(env);
   if (!studio || typeof studio !== 'object' || Array.isArray(studio)) return false;
   studio.pushSubscriptions = list;
-  const id = env.RENTRY_ID || 'jyangjyang-studio';
-  const code = env.RENTRY_CODE || 'jyangcloud';
-  const res = await fetch(`https://rentry.co/api/edit/${id}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `edit_code=${encodeURIComponent(code)}&text=${encodeURIComponent(JSON.stringify(studio))}`,
+  const payload = JSON.stringify(studio);
+  const url = env.CLOUD_URL || 'https://extendsclass.com/api/json-storage/bin/ebefede';
+  if (payload.length > 90_000) return false;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+    body: payload,
   });
-  const data = await res.json().catch(() => ({}));
-  return String(data.status || '') === '200';
+  return res.ok;
 }
 
 async function saveDedicated(env, list) {
@@ -143,7 +169,7 @@ function vapid(env) {
   const privateKey = env.VAPID_PRIVATE_KEY || '';
   if (!publicKey || !privateKey) return null;
   return {
-    subject: env.VAPID_SUBJECT || 'mailto:jyang@localhost',
+    subject: 'https://jyangjyang.surge.sh',
     publicKey,
     privateKey,
   };
@@ -179,11 +205,10 @@ async function sendPush(env, targets, payload) {
           options: { ttl: 86400, urgency: payload.urgency || 'high' },
         };
         const built = await buildPushPayload(message, item.subscription, keys);
-        const endpoint = built.endpoint || item.endpoint;
-        const init = built.init || built;
-        const res = await fetch(endpoint, init);
+        const res = await fetch(item.subscription.endpoint, built);
         if (res.status === 404 || res.status === 410) gone.push(item.endpoint);
         else if (res.ok || res.status === 201) sent += 1;
+        else console.log('push-result', res.status);
       } catch {
         // skip broken endpoints
       }
@@ -242,14 +267,19 @@ export default {
       const uid = String(body.uid || '');
       if (!uid) return json(400, { error: '로그인한 뒤 테스트 알림을 보낼 수 있습니다.' });
       const list = await loadPushList(env);
-      const result = await sendPush(env, matchPushSubscriptions(list, { audience: 'uid', uid }), {
+      const targets = matchPushSubscriptions(list, { audience: 'uid', uid });
+      const result = await sendPush(env, targets, {
         title: '쟝쟝 알림 테스트',
         body: '앱을 닫아도 이 알림이 오면 맥이 꺼져 있어도 푸시가 연결된 것입니다.',
         url: '/',
         tag: 'jyang-jyang-test',
       });
       if (!result.sent) {
-        return json(400, { error: '이 기기의 푸시 구독이 없습니다. 알림 켜기를 다시 눌러 주세요.' });
+        return json(400, {
+          error: targets.length
+            ? '푸시 서버가 이 기기로 보내지 못했습니다. 알림 켜기를 다시 눌러 주세요.'
+            : '이 기기의 푸시 구독이 없습니다. 알림 켜기를 다시 눌러 주세요.',
+        });
       }
       return json(200, { ok: true, sent: result.sent });
     }

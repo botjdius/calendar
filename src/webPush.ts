@@ -188,21 +188,23 @@ export async function showWebPushTest(ctx: PushContext = {}) {
   if (!webPushSupported() || Notification.permission !== 'granted') {
     throw new Error('먼저 알림을 허용해 주세요.');
   }
-  try {
-    if (ctx.uid) {
+  if (ctx.uid) {
+    try {
       await requestCloudPushTest(ctx.uid);
       return;
+    } catch (error) {
+      if (ctx.hubBase) {
+        try {
+          await requestHubPushTest(ctx.hubBase, ctx.uid);
+          return;
+        } catch {
+          // keep the cloud error; it is what the phone will hit when the hub is off
+        }
+      }
+      throw error instanceof Error
+        ? error
+        : new Error('테스트 알림을 보내지 못했습니다. 알림 켜기를 다시 눌러 주세요.');
     }
-  } catch {
-    if (ctx.hubBase && ctx.uid) {
-      await requestHubPushTest(ctx.hubBase, ctx.uid);
-      return;
-    }
-    throw new Error('테스트 알림을 보내지 못했습니다. 알림 켜기를 다시 눌러 주세요.');
-  }
-  if (ctx.hubBase && ctx.uid) {
-    await requestHubPushTest(ctx.hubBase, ctx.uid);
-    return;
   }
   const registration = await navigator.serviceWorker.ready;
   await registration.showNotification('쟝쟝 알림 테스트', {
