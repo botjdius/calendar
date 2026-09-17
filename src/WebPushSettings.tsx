@@ -1,15 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Platform, Text, View } from 'react-native';
+import { useStore } from './store';
 import { colors } from './theme';
 import { Button, Card, Fold, Pill } from './ui';
-import {
-  currentWebPushPermission,
-  enableWebPush,
-  showWebPushTest,
-  type WebPushResult,
-} from './webPush';
+import { cloudPushConfigured } from './cloudPush';
+import { currentWebPushPermission, type WebPushResult } from './webPush';
 
 export function WebPushSettings() {
+  const { user, registerWebPush, sendWebPushTest } = useStore();
   const [state, setState] = useState<WebPushResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [testSent, setTestSent] = useState(false);
@@ -18,12 +16,12 @@ export function WebPushSettings() {
     if (Platform.OS === 'web') setState(currentWebPushPermission());
   }, []);
 
-  if (Platform.OS !== 'web' || !state) return null;
+  if (Platform.OS !== 'web' || !state || !user) return null;
 
   const status =
     state.permission === 'granted'
-      ? state.fcmReady
-        ? { label: 'FCM 연결됨', tone: 'pine' as const }
+      ? state.hubSaved
+        ? { label: '앱 꺼도 수신', tone: 'pine' as const }
         : { label: '알림 허용됨', tone: 'clay' as const }
       : state.permission === 'denied'
         ? { label: '알림 차단됨', tone: 'wine' as const }
@@ -36,11 +34,12 @@ export function WebPushSettings() {
     setBusy(true);
     setTestSent(false);
     try {
-      setState(await enableWebPush());
+      setState(await registerWebPush());
     } catch (error) {
       setState((previous) => ({
         permission: previous?.permission || 'default',
-        fcmReady: false,
+        pushReady: false,
+        hubSaved: false,
         token: '',
         message:
           error instanceof Error
@@ -56,7 +55,7 @@ export function WebPushSettings() {
     if (busy) return;
     setBusy(true);
     try {
-      await showWebPushTest();
+      await sendWebPushTest();
       setTestSent(true);
     } catch (error) {
       setState((previous) => ({
@@ -75,7 +74,11 @@ export function WebPushSettings() {
           <Pill label={status.label} tone={status.tone} />
         </View>
         <Text style={{ color: colors.muted, lineHeight: 22, marginBottom: 12 }}>
-          {testSent ? '테스트 알림을 보냈습니다. 기기의 알림 화면을 확인해 주세요.' : state.message}
+          {testSent
+            ? state.hubSaved || cloudPushConfigured()
+              ? '서버 테스트 알림을 보냈습니다. 앱을 완전히 나간 뒤에도 왔는지 확인해 주세요.'
+              : '테스트 알림을 보냈습니다. 알림 켜기를 다시 연결하면 앱을 꺼도 받을 수 있습니다.'
+            : state.message}
         </Text>
         {state.permission !== 'unsupported' && state.permission !== 'denied' ? (
           <Button

@@ -1,21 +1,20 @@
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
-import { listenForForegroundMessages } from './webPush';
+import { useStore } from './store';
+import { syncWebPushIfAllowed } from './webPush';
 
 export function WebPushListener() {
+  const { ready, user, hubUrl } = useStore();
+
   useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    let unsubscribe: undefined | (() => void);
-    let active = true;
-    void listenForForegroundMessages().then((next) => {
-      if (active) unsubscribe = next;
-      else next();
+    if (Platform.OS !== 'web' || !ready || !user) return;
+    void syncWebPushIfAllowed({
+      hubBase: hubUrl,
+      uid: user.uid,
+      role: user.role,
+      studentId: user.studentId,
     });
-    return () => {
-      active = false;
-      unsubscribe?.();
-    };
-  }, []);
+  }, [ready, user?.uid, user?.role, user?.studentId, hubUrl]);
 
   return null;
 }

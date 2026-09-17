@@ -36,6 +36,11 @@ yarn-error.*
 
 # local deploy/tooling state
 .netlify/
+.wrangler/
+.dev.vars
+push-worker/.wrangler/
+push-worker/node_modules/
+push-worker/.dev.vars
 
 # typescript
 *.tsbuildinfo

@@ -32,10 +32,14 @@ export const isWebPushFirebaseConfigured = Boolean(
     webPushFirebaseConfig.appId
 );
 
-export const webPushVapidKey =
+export const vapidPublicKey =
+  process.env.EXPO_PUBLIC_VAPID_PUBLIC_KEY ||
   process.env.EXPO_PUBLIC_FCM_VAPID_KEY ||
   process.env.EXPO_PUBLIC_FIREBASE_VAPID_KEY ||
   '';
+
+export const pushUrl = (process.env.EXPO_PUBLIC_PUSH_URL || '').replace(/\/$/, '');
+export const pushGate = process.env.EXPO_PUBLIC_PUSH_GATE || '';
 
 export const siteUrl = (
   process.env.EXPO_PUBLIC_SITE_URL ||

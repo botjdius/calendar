@@ -57,7 +57,10 @@ import { INSTRUCTOR_INVITE_CODE, isFirebaseConfigured } from './config';
 import { externalizeStudents, isFilePointer, releaseFilePointer } from './fileCloud.mjs';
 import { auth, db } from './firebase';
 import { discoverHub, emptyBank, emptyShared, fetchBlob, hubAuth, isEphemeralHubUrl, mergeBanks, packBanks, probeHub, putBlob, rememberHubUrl, rememberPublicHubUrl, savedHubUrl, type SharedBlob } from './hub';
+import { feedbackInstructorPush, makeupInstructorPush, makeupStudentPush, notifyRemotePush } from './pushNotify';
+import { mergePushSubscriptions } from './pushStore';
 import { applyRemoveStudent, requestsForLiveStudents } from './studentRoster';
+import { enableWebPush, showWebPushTest, type WebPushResult } from './webPush';
 import { pickAndUploadSessionFile } from './files';
 import {
   applyAllHolidays,
@@ -218,6 +221,8 @@ type Store = {
   saveBanks: (banks: BankAccount[]) => Promise<void>;
   saveInstructorName: (name: string) => Promise<void>;
   setPackPayment: (studentId: string, pack: number, paid: boolean, paidAt?: string, paidSessionId?: string) => Promise<void>;
+  registerWebPush: () => Promise<WebPushResult>;
+  sendWebPushTest: () => Promise<void>;
 };
 
 const StoreContext = createContext<Store | null>(null);
@@ -445,6 +450,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       removedOpenSlots,
       ...(incomplete ? packBanks(latest.bank, latest.banks) : mergeBanks(shared, latest)),
       removedStudents: removed,
+      pushSubscriptions: mergePushSubscriptions(latest.pushSubscriptions, shared.pushSubscriptions),
       sessionUid: uid ?? latest.sessionUid,
       dirty: incomplete ? latest.dirty || dirtyRef.current : false,
     });
@@ -476,6 +482,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         removedFeedback: local.removedFeedback || [],
         removedRequests: local.removedRequests || [],
         removedOpenSlots: local.removedOpenSlots || [],
+        pushSubscriptions: local.pushSubscriptions || [],
       });
       if (writeGenRef.current !== gen) return;
       applyShared(saved, uid);
@@ -510,6 +517,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       removedFeedback: local.removedFeedback || [],
       removedRequests: local.removedRequests || [],
       removedOpenSlots: local.removedOpenSlots || [],
+      pushSubscriptions: local.pushSubscriptions || [],
     });
   }
 
@@ -811,6 +819,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         removedFeedback: local.removedFeedback || [],
         removedRequests: local.removedRequests || [],
         removedOpenSlots: local.removedOpenSlots || [],
+        pushSubscriptions: local.pushSubscriptions || [],
       });
       applyShared(saved, uid);
       await cacheHubView(saved, uid);
@@ -1088,6 +1097,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...(cloud ? mergeBanks(incomingNewer ? cloud : blob, incomingNewer ? blob : cloud) : packBanks(blob.bank, blob.banks)),
         accounts: cloud ? mergeCloudAccounts(blob.accounts, cloud.accounts) : blob.accounts,
         removedStudents,
+        pushSubscriptions: mergePushSubscriptions(blob.pushSubscriptions, cloud?.pushSubscriptions),
       };
       const next: LocalBlob = {
         ...base,
@@ -1130,6 +1140,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ),
         accounts: patch.accounts ?? base.accounts,
         removedStudents,
+        pushSubscriptions: mergePushSubscriptions(base.pushSubscriptions, patch.pushSubscriptions),
         sessionUid: uid ?? blob.sessionUid,
         dirty: true,
       };
@@ -2087,6 +2098,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       };
       if (firebaseOn) {
         await setDoc(doc(db!, 'makeupRequests', item.id), item);
+        notifyRemotePush(makeupInstructorPush(item));
         return;
       }
       writeGenRef.current += 1;
@@ -2101,6 +2113,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           applyShared(view, user.uid);
           await cacheHubView(view, user.uid);
           await pushCloudSnapshot();
+          notifyRemotePush(makeupInstructorPush(item));
           return;
         } catch {
           hubBase.current = null;
@@ -2110,6 +2123,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const shared = await currentShared();
       try {
         await persistShared({ requests: [item] });
+        notifyRemotePush(makeupInstructorPush(item));
       } catch {
         await persistShared({ requests: shared.requests || [] }, { skipCloud: true, replace: true });
         throw new Error('강사에게 신청을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.');
@@ -2131,6 +2145,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const req = requests.find((r) => r.id === requestId);
         if (!req) throw new Error('바꿀 신청이 없습니다.');
         await updateDoc(doc(db!, 'makeupRequests', requestId), applyStudentChange(req, slot, session));
+        notifyRemotePush(makeupInstructorPush({ ...req, ...applyStudentChange(req, slot, session) }));
         return;
       }
       writeGenRef.current += 1;
@@ -2146,6 +2161,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           applyShared(view, user.uid);
           await cacheHubView(view, user.uid);
           await pushCloudSnapshot();
+          const changed = (view.requests || []).find((r) => r.id === requestId);
+          if (changed) notifyRemotePush(makeupInstructorPush(changed));
           return;
         } catch {
           hubBase.current = null;
@@ -2156,9 +2173,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const req = (shared.requests || []).find((r) => r.id === requestId);
       if (!req) throw new Error('바꿀 신청이 없습니다.');
       try {
+        const next = applyStudentChange(req, slot, session);
         await persistShared({
-          requests: (shared.requests || []).map((r) => (r.id === requestId ? applyStudentChange(r, slot, session) : r)),
+          requests: (shared.requests || []).map((r) => (r.id === requestId ? next : r)),
         });
+        notifyRemotePush(makeupInstructorPush(next));
       } catch {
         await persistShared({ requests: shared.requests || [] }, { skipCloud: true, replace: true });
         throw new Error('강사에게 변경을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.');
@@ -2170,6 +2189,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const req = requests.find((r) => r.id === requestId);
         if (!req) throw new Error('철회할 신청이 없습니다.');
         await updateDoc(doc(db!, 'makeupRequests', requestId), applyStudentWithdraw(req));
+        notifyRemotePush(makeupInstructorPush(applyStudentWithdraw(req)));
         return;
       }
       writeGenRef.current += 1;
@@ -2183,6 +2203,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           applyShared(view, user.uid);
           await cacheHubView(view, user.uid);
           await pushCloudSnapshot();
+          const withdrawn = (view.requests || []).find((r) => r.id === requestId);
+          if (withdrawn) notifyRemotePush(makeupInstructorPush(withdrawn));
           return;
         } catch {
           hubBase.current = null;
@@ -2193,9 +2215,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const req = (shared.requests || []).find((r) => r.id === requestId);
       if (!req) throw new Error('철회할 신청이 없습니다.');
       try {
+        const next = applyStudentWithdraw(req);
         await persistShared({
-          requests: (shared.requests || []).map((r) => (r.id === requestId ? applyStudentWithdraw(r) : r)),
+          requests: (shared.requests || []).map((r) => (r.id === requestId ? next : r)),
         });
+        notifyRemotePush(makeupInstructorPush(next));
       } catch {
         await persistShared({ requests: shared.requests || [] }, { skipCloud: true, replace: true });
         throw new Error('강사에게 철회를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.');
@@ -2213,6 +2237,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!item) throw new Error('내용을 적어 주세요.');
       if (firebaseOn) {
         await setDoc(doc(db!, 'feedback', item.id), item);
+        notifyRemotePush(feedbackInstructorPush());
         return;
       }
       writeGenRef.current += 1;
@@ -2232,6 +2257,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           });
           feedbackRef.current = mergeFeedback(feedbackRef.current, [item]);
           await pushCloudSnapshot();
+          notifyRemotePush(feedbackInstructorPush());
           return;
         } catch {
           hubBase.current = null;
@@ -2241,6 +2267,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const shared = await currentShared();
       try {
         await persistShared({ feedback: mergeFeedback(shared.feedback, [item]) });
+        notifyRemotePush(feedbackInstructorPush());
       } catch {
         await persistShared({ feedback: shared.feedback || [] }, { skipCloud: true });
         throw new Error('강사에게 피드백을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.');
@@ -2318,6 +2345,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           await api.setMakeup(req.studentId, req.sessionId, { date: req.date, time: req.time, status: 'planned' });
         }
+        notifyRemotePush(
+          makeupStudentPush(
+            req,
+            accepted ? '보강 수락' : '보강 거절',
+            accepted ? '신청한 보강이 수락되었습니다.' : '신청한 보강이 거절되었습니다.'
+          )
+        );
         return;
       }
       if (hubBase.current) {
@@ -2331,6 +2365,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           applyShared(view, user?.uid ?? null);
           await cacheHubView(view, user?.uid || '');
           await pushCloudSnapshot();
+          notifyRemotePush(
+            makeupStudentPush(
+              { id: requestId, studentId: (view.requests || []).find((r) => r.id === requestId)?.studentId || '' },
+              accepted ? '보강 수락' : '보강 거절',
+              accepted ? '신청한 보강이 수락되었습니다.' : '신청한 보강이 거절되었습니다.'
+            )
+          );
           return;
         } catch {
           hubBase.current = null;
@@ -2346,6 +2387,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         students: applyDecideToStudents(shared.students, req, accepted, shared.closures),
         openSlots: applyDecideToSlots(shared.openSlots || [], req, accepted, nextRequests),
       });
+      notifyRemotePush(
+        makeupStudentPush(
+          req,
+          accepted ? '보강 수락' : '보강 거절',
+          accepted ? '신청한 보강이 수락되었습니다.' : '신청한 보강이 거절되었습니다.'
+        )
+      );
     },
     async reviseMakeup(requestId, action) {
       requireInstructor();
@@ -2384,6 +2432,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             willAccept ? { date: req.date, time: req.time, status: 'planned' } : null
           );
         }
+        notifyRemotePush(
+          makeupStudentPush(
+            req,
+            nextAction === 'accept' ? '보강 수락' : nextAction === 'decline' ? '보강 거절' : '보강 철회',
+            nextAction === 'accept'
+              ? '보강 일정이 수락으로 변경되었습니다.'
+              : nextAction === 'decline'
+                ? '보강 일정이 거절로 변경되었습니다.'
+                : '보강 일정이 철회되었습니다.'
+          )
+        );
         return;
       }
       if (hubBase.current) {
@@ -2397,6 +2456,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           applyShared(view, user?.uid ?? null);
           await cacheHubView(view, user?.uid || '');
           await pushCloudSnapshot();
+          const revised = (view.requests || []).find((r) => r.id === requestId);
+          if (revised) {
+            notifyRemotePush(
+              makeupStudentPush(
+                revised,
+                nextAction === 'accept' ? '보강 수락' : nextAction === 'decline' ? '보강 거절' : '보강 철회',
+                nextAction === 'accept'
+                  ? '보강 일정이 수락으로 변경되었습니다.'
+                  : nextAction === 'decline'
+                    ? '보강 일정이 거절로 변경되었습니다.'
+                    : '보강 일정이 철회되었습니다.'
+              )
+            );
+          }
           return;
         } catch (err) {
           const reachable = await probeHub(hubBase.current);
@@ -2415,6 +2488,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         students: applyReviseToStudents(shared.students, req, nextAction, shared.closures),
         openSlots: applyReviseToSlots(shared.openSlots || [], shared.requests || [], req, nextAction),
       });
+      notifyRemotePush(
+        makeupStudentPush(
+          req,
+          nextAction === 'accept' ? '보강 수락' : nextAction === 'decline' ? '보강 거절' : '보강 철회',
+          nextAction === 'accept'
+            ? '보강 일정이 수락으로 변경되었습니다.'
+            : nextAction === 'decline'
+              ? '보강 일정이 거절로 변경되었습니다.'
+              : '보강 일정이 철회되었습니다.'
+        )
+      );
     },
     async removeMakeupHistory(requestId) {
       requireInstructor();
@@ -2560,6 +2644,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ),
       });
       await rememberLogin({ role: 'instructor', name: next });
+    },
+    async registerWebPush() {
+      if (!user) throw new Error('로그인한 뒤 알림을 켜 주세요.');
+      return enableWebPush({
+        hubBase: hubBase.current,
+        uid: user.uid,
+        role: user.role,
+        studentId: user.studentId,
+        persistSubscription: async (record) => {
+          await persistShared({ pushSubscriptions: [record] });
+        },
+      });
+    },
+    async sendWebPushTest() {
+      if (!user) throw new Error('로그인한 뒤 테스트 알림을 보낼 수 있습니다.');
+      await showWebPushTest({
+        hubBase: hubBase.current,
+        uid: user.uid,
+        role: user.role,
+        studentId: user.studentId,
+      });
     },
   };
 

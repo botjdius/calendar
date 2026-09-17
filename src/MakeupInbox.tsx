@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { timeLabel } from './MonthCal';
 import { makeupIntent } from './makeup';
@@ -9,18 +9,6 @@ import { useStore } from './store';
 import { colors } from './theme';
 import type { MakeupRequest } from './types';
 import { Button, Card } from './ui';
-
-function notifyNewRequests(fresh: MakeupRequest[]) {
-  if (!fresh.length) return;
-  if (Platform.OS !== 'web' || typeof Notification === 'undefined') return;
-  if (Notification.permission !== 'granted') return;
-  const first = fresh[0];
-  const extra = fresh.length > 1 ? ` 외 ${fresh.length - 1}건` : '';
-  new Notification('보강 신청', {
-    body: `${first.studentName} 학생이 ${timeLabel(first.date)} ${formatTime12(first.time)} 보강을 신청했습니다.${extra}`,
-    tag: first.id,
-  });
-}
 
 function decideLabels(req: MakeupRequest) {
   const intent = makeupIntent(req);
@@ -36,23 +24,8 @@ function requestLine(req: MakeupRequest) {
 export function MakeupInbox() {
   const { user, requests, decideMakeup } = useStore();
   const router = useRouter();
-  const seenRef = useRef<Set<string> | null>(null);
   const [busyId, setBusyId] = useState('');
   const pending = requests.filter((r) => r.status === 'pending');
-
-  useEffect(() => {
-    if (user?.role !== 'instructor') return;
-    const ids = pending.map((r) => r.id);
-    if (seenRef.current === null) {
-      seenRef.current = new Set(ids);
-      return;
-    }
-    const fresh = pending.filter((r) => !seenRef.current!.has(r.id));
-    if (fresh.length) {
-      notifyNewRequests(fresh);
-      fresh.forEach((r) => seenRef.current!.add(r.id));
-    }
-  }, [pending, user?.role]);
 
   async function decide(id: string, accepted: boolean) {
     if (busyId) return;

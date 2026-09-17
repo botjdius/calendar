@@ -1,19 +1,25 @@
 import { Platform } from 'react-native';
-import { getApps, initializeApp } from 'firebase/app';
-import {
-  isWebPushFirebaseConfigured,
-  webPushFirebaseConfig,
-  webPushVapidKey,
-} from './config';
+import { fetchCloudVapidPublicKey, requestCloudPushTest, saveCloudPushSubscription } from './cloudPush';
+import { vapidPublicKey } from './config';
+import { fetchVapidPublicKey, requestHubPushTest, savePushSubscription } from './hub';
+import { normalizePushSubscription, type PushSubscriptionRecord } from './pushStore';
 
-const TOKEN_KEY = 'jyang-jyang-fcm-token';
-const FCM_APP_NAME = 'jyang-web-push';
+const TOKEN_KEY = 'jyang-jyang-push-endpoint';
 
 export type WebPushResult = {
   permission: NotificationPermission | 'unsupported';
-  fcmReady: boolean;
+  pushReady: boolean;
+  hubSaved: boolean;
   token: string;
   message: string;
+};
+
+type PushContext = {
+  hubBase?: string | null;
+  uid?: string | null;
+  role?: 'instructor' | 'student' | null;
+  studentId?: string | null;
+  persistSubscription?: (record: PushSubscriptionRecord) => Promise<void>;
 };
 
 export function webPushSupported() {
@@ -30,16 +36,19 @@ export function currentWebPushPermission(): WebPushResult {
   if (!webPushSupported()) {
     return {
       permission: 'unsupported',
-      fcmReady: false,
+      pushReady: false,
+      hubSaved: false,
       token: '',
-      message: '이 브라우저에서는 웹 알림을 지원하지 않습니다.',
+      message: '이 브라우저에서는 웹 알림을 지원하지 않습니다. 홈 화면에 추가한 쟝쟝에서 켜 주세요.',
     };
   }
   const permission = Notification.permission;
+  const endpoint = localStorage.getItem(TOKEN_KEY) || '';
   return {
     permission,
-    fcmReady: false,
-    token: localStorage.getItem(TOKEN_KEY) || '',
+    pushReady: permission === 'granted',
+    hubSaved: Boolean(endpoint),
+    token: endpoint,
     message:
       permission === 'granted'
         ? '브라우저 알림이 허용되어 있습니다.'
@@ -49,15 +58,57 @@ export function currentWebPushPermission(): WebPushResult {
   };
 }
 
-function messagingApp() {
-  if (!isWebPushFirebaseConfigured) return null;
-  return (
-    getApps().find((candidate) => candidate.name === FCM_APP_NAME) ||
-    initializeApp(webPushFirebaseConfig, FCM_APP_NAME)
-  );
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) output[i] = raw.charCodeAt(i);
+  return output;
 }
 
-export async function enableWebPush(): Promise<WebPushResult> {
+async function resolveVapidKey(hubBase?: string | null) {
+  if (vapidPublicKey) return vapidPublicKey;
+  const cloudKey = await fetchCloudVapidPublicKey();
+  if (cloudKey) return cloudKey;
+  if (!hubBase) return '';
+  try {
+    return await fetchVapidPublicKey(hubBase);
+  } catch {
+    return '';
+  }
+}
+
+async function currentSubscription(registration: ServiceWorkerRegistration) {
+  return registration.pushManager.getSubscription();
+}
+
+function toRecord(
+  ctx: PushContext,
+  subscription: PushSubscription
+): PushSubscriptionRecord | null {
+  return normalizePushSubscription({
+    uid: ctx.uid || '',
+    role: ctx.role === 'instructor' ? 'instructor' : 'student',
+    studentId: ctx.studentId || undefined,
+    endpoint: subscription.endpoint,
+    subscription: subscription.toJSON(),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+async function saveRecord(ctx: PushContext, record: PushSubscriptionRecord) {
+  const results = await Promise.allSettled([
+    saveCloudPushSubscription(record),
+    ctx.persistSubscription ? ctx.persistSubscription(record).then(() => true) : Promise.resolve(false),
+    ctx.hubBase && ctx.uid
+      ? savePushSubscription(ctx.hubBase, ctx.uid, record.subscription).then(() => true)
+      : Promise.resolve(false),
+  ]);
+  return results.some((item) => item.status === 'fulfilled' && Boolean(item.value));
+}
+
+export async function enableWebPush(ctx: PushContext = {}): Promise<WebPushResult> {
   if (!webPushSupported()) return currentWebPushPermission();
 
   const permission =
@@ -68,11 +119,12 @@ export async function enableWebPush(): Promise<WebPushResult> {
   if (permission !== 'granted') {
     return {
       permission,
-      fcmReady: false,
+      pushReady: false,
+      hubSaved: false,
       token: '',
       message:
         permission === 'denied'
-          ? '알림이 차단되었습니다. 브라우저 사이트 설정에서 알림을 허용해 주세요.'
+          ? '알림이 차단되었습니다. 홈 화면 쟝쟝 앱의 알림을 허용해 주세요.'
           : '알림 권한이 아직 허용되지 않았습니다.',
     };
   }
@@ -80,81 +132,84 @@ export async function enableWebPush(): Promise<WebPushResult> {
   const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
   await navigator.serviceWorker.ready;
 
-  const firebaseApp = messagingApp();
-  if (!firebaseApp || !webPushVapidKey) {
+  const publicKey = await resolveVapidKey(ctx.hubBase);
+  if (!publicKey) {
     return {
       permission,
-      fcmReady: false,
+      pushReady: false,
+      hubSaved: false,
       token: '',
-      message: '알림은 허용됐습니다. FCM 프로젝트와 VAPID 공개 키 설정이 필요합니다.',
+      message: '알림은 허용됐습니다. 잠시 후 다시 알림 켜기를 눌러 주세요.',
     };
   }
 
-  const { getMessaging, getToken, isSupported } = await import('firebase/messaging');
-  if (!(await isSupported())) {
+  let subscription = await currentSubscription(registration);
+  if (!subscription) {
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+  }
+
+  const endpoint = subscription.endpoint;
+  localStorage.setItem(TOKEN_KEY, endpoint);
+
+  const record = ctx.uid ? toRecord(ctx, subscription) : null;
+  const saved = record ? await saveRecord(ctx, record) : false;
+  if (!saved) {
     return {
       permission,
-      fcmReady: false,
-      token: '',
-      message: '이 브라우저에서는 Firebase 웹 푸시를 지원하지 않습니다.',
+      pushReady: true,
+      hubSaved: false,
+      token: endpoint,
+      message: '알림은 허용됐습니다. 인터넷 연결을 확인한 뒤 알림 켜기를 다시 눌러 주세요.',
     };
   }
 
-  const token = await getToken(getMessaging(firebaseApp), {
-    vapidKey: webPushVapidKey,
-    serviceWorkerRegistration: registration,
-  });
-  if (!token) {
-    return {
-      permission,
-      fcmReady: false,
-      token: '',
-      message: 'FCM 알림 토큰을 발급하지 못했습니다. Firebase 설정을 확인해 주세요.',
-    };
-  }
-
-  localStorage.setItem(TOKEN_KEY, token);
   return {
     permission,
-    fcmReady: true,
-    token,
-    message: '이 기기에서 푸시 알림을 받을 준비가 됐습니다.',
+    pushReady: true,
+    hubSaved: true,
+    token: endpoint,
+    message: '이 기기에서 앱을 꺼도 보강·피드백 푸시를 받을 준비가 됐습니다.',
   };
 }
 
-export async function showWebPushTest() {
+export async function syncWebPushIfAllowed(ctx: PushContext = {}): Promise<WebPushResult | null> {
+  if (!webPushSupported() || Notification.permission !== 'granted') return null;
+  try {
+    return await enableWebPush(ctx);
+  } catch {
+    return currentWebPushPermission();
+  }
+}
+
+export async function showWebPushTest(ctx: PushContext = {}) {
   if (!webPushSupported() || Notification.permission !== 'granted') {
     throw new Error('먼저 알림을 허용해 주세요.');
   }
+  try {
+    if (ctx.uid) {
+      await requestCloudPushTest(ctx.uid);
+      return;
+    }
+  } catch {
+    if (ctx.hubBase && ctx.uid) {
+      await requestHubPushTest(ctx.hubBase, ctx.uid);
+      return;
+    }
+    throw new Error('테스트 알림을 보내지 못했습니다. 알림 켜기를 다시 눌러 주세요.');
+  }
+  if (ctx.hubBase && ctx.uid) {
+    await requestHubPushTest(ctx.hubBase, ctx.uid);
+    return;
+  }
   const registration = await navigator.serviceWorker.ready;
   await registration.showNotification('쟝쟝 알림 테스트', {
-    body: '이 기기에서 웹 푸시 알림을 정상적으로 표시할 수 있습니다.',
+    body: '앱이 열려 있을 때만 보이는 테스트입니다. 알림 켜기를 다시 누르면 닫아도 받을 수 있습니다.',
     icon: '/icon-192.png',
     badge: '/icon-192.png',
     tag: 'jyang-jyang-test',
     data: { url: '/' },
-  });
-}
-
-export async function listenForForegroundMessages() {
-  if (!webPushSupported() || !isWebPushFirebaseConfigured || !webPushVapidKey) {
-    return () => {};
-  }
-  const firebaseApp = messagingApp();
-  if (!firebaseApp) return () => {};
-  const { getMessaging, isSupported, onMessage } = await import('firebase/messaging');
-  if (!(await isSupported())) return () => {};
-
-  return onMessage(getMessaging(firebaseApp), async (payload) => {
-    if (Notification.permission !== 'granted') return;
-    const registration = await navigator.serviceWorker.ready;
-    const title = payload.notification?.title || payload.data?.title || '쟝쟝';
-    await registration.showNotification(title, {
-      body: payload.notification?.body || payload.data?.body || '새 알림이 도착했습니다.',
-      icon: payload.notification?.icon || '/icon-192.png',
-      badge: '/icon-192.png',
-      tag: payload.messageId || payload.data?.tag || 'jyang-jyang-message',
-      data: { url: payload.fcmOptions?.link || payload.data?.link || '/' },
-    });
   });
 }

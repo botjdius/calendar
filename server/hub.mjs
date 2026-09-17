@@ -1,10 +1,19 @@
+import './env.mjs';
 import { createServer, request as httpRequest } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startPublicTunnel } from './tunnel.mjs';
+import {
+  pushReady,
+  removeSubscription,
+  sendPushTo,
+  upsertSubscription,
+  vapidPublicKey,
+} from './webPush.mjs';
 import { mergeBanks, packBanks } from './bank.mjs';
+import { mergePushSubscriptions } from './pushStore.mjs';
 import { dropStudentsMissingFrom, fetchCloud, findStudentByJoinCode, joinCodeBlocked, liveStudents, mergeById, mergeFeedback, mergeOpenSlots, mergeRemovedFeedback, dropRemovedFeedback, mergeRemovedOpenSlots, dropRemovedOpenSlots, mergeRemovedRequests, dropRemovedRequests, mergeRemovedStudents, mergeRequests, mergeStudents, pushCloud, sanitizeFeedback, studentSessionRevoked } from './cloud.mjs';
 import { applyRemoveStudent } from './studentRoster.mjs';
 import {
@@ -55,6 +64,7 @@ const empty = () => ({
   bank: { bankName: '', accountNumber: '', accountHolder: '' },
   banks: [],
   removedStudents: [],
+  pushSubscriptions: [],
 });
 
 function load() {
@@ -120,6 +130,42 @@ function bump() {
   save();
 }
 
+function saveSubscriptions() {
+  save(true);
+}
+
+function studentUid(studentId) {
+  const card = (state.students || []).find((item) => item.id === studentId);
+  if (card?.linkedUid) return card.linkedUid;
+  return (state.accounts || []).find((item) => item.studentId === studentId)?.uid || '';
+}
+
+async function dispatchPush(matcher, payload) {
+  const result = await sendPushTo(state.pushSubscriptions, matcher, payload);
+  if (result.gone.length) {
+    state.pushSubscriptions = (state.pushSubscriptions || []).filter(
+      (item) => !result.gone.includes(item.endpoint)
+    );
+    saveSubscriptions();
+  }
+  return result;
+}
+
+function notifyInstructors(payload) {
+  void dispatchPush((item) => item.role === 'instructor', payload);
+}
+
+function notifyStudent(studentId, payload) {
+  const uid = studentUid(studentId);
+  if (!uid) return;
+  void dispatchPush((item) => item.uid === uid, payload);
+}
+
+function makeupPushBody(req) {
+  const when = [req.date, req.time].filter(Boolean).join(' ');
+  return `${req.studentName || '레슨생'}${when ? ` · ${when}` : ''}`;
+}
+
 function mergeHubAccounts(local, cloud) {
   const next = [...(local || [])];
   for (const account of cloud || []) {
@@ -132,7 +178,15 @@ function mergeHubAccounts(local, cloud) {
   return next;
 }
 
+let skipCloudPush = true;
+
 async function pullCloudIntoHub() {
+  const prevPending = new Set(
+    (state.requests || [])
+      .filter((item) => item.status === 'pending')
+      .map((item) => `${item.id}:${item.updatedAt || item.createdAt || ''}`)
+  );
+  const prevFeedback = new Set((state.feedback || []).map((item) => item.id));
   const cloud = await fetchCloud();
   if (!cloud) return;
   const incomingNewer = (cloud.version || 0) > (state.version || 0);
@@ -153,6 +207,7 @@ async function pullCloudIntoHub() {
   const removedRequests = mergeRemovedRequests(state.removedRequests, cloud.removedRequests);
   const feedback = dropRemovedFeedback(mergeFeedback(state.feedback, cloud.feedback), removedFeedback);
   const accounts = mergeHubAccounts(state.accounts, cloud.accounts);
+  const pushSubscriptions = mergePushSubscriptions(state.pushSubscriptions, cloud.pushSubscriptions);
   const before = JSON.stringify({
     students: state.students,
     closures: state.closures,
@@ -164,9 +219,25 @@ async function pullCloudIntoHub() {
     removedFeedback: state.removedFeedback || [],
     removedRequests: state.removedRequests || [],
     removedOpenSlots: state.removedOpenSlots || [],
+    pushSubscriptions: state.pushSubscriptions || [],
   });
-  const after = JSON.stringify({ students, closures, openSlots, requests, feedback, accounts, removedStudents, removedFeedback, removedRequests, removedOpenSlots });
-  if (before === after) return;
+  const after = JSON.stringify({
+    students,
+    closures,
+    openSlots,
+    requests,
+    feedback,
+    accounts,
+    removedStudents,
+    removedFeedback,
+    removedRequests,
+    removedOpenSlots,
+    pushSubscriptions,
+  });
+  if (before === after) {
+    skipCloudPush = false;
+    return;
+  }
   const requestsChanged = JSON.stringify(state.requests || []) !== JSON.stringify(requests);
   const feedbackChanged = JSON.stringify(state.feedback || []) !== JSON.stringify(feedback);
   state.students = students;
@@ -179,6 +250,7 @@ async function pullCloudIntoHub() {
   state.removedFeedback = removedFeedback;
   state.removedRequests = removedRequests;
   state.removedOpenSlots = removedOpenSlots;
+  state.pushSubscriptions = pushSubscriptions;
   if (incomingNewer) {
     const packed = mergeBanks(cloud, state);
     state.bank = packed.bank;
@@ -186,6 +258,28 @@ async function pullCloudIntoHub() {
   }
   state.version = Math.max(state.version || 0, cloud.version || 0) + ((requestsChanged || feedbackChanged) && !incomingNewer ? 1 : 0);
   save(false);
+  if (skipCloudPush) {
+    skipCloudPush = false;
+    return;
+  }
+  for (const item of state.requests || []) {
+    if (item.status !== 'pending') continue;
+    if (prevPending.has(`${item.id}:${item.updatedAt || item.createdAt || ''}`)) continue;
+    notifyInstructors({
+      title: item.intent === 'withdraw' ? '보강 철회' : item.intent === 'change' ? '보강 변경' : '보강 신청',
+      body: makeupPushBody(item),
+      url: `/student/${item.studentId}`,
+      tag: `makeup-${item.id}`,
+    });
+  }
+  if ((state.feedback || []).some((item) => !prevFeedback.has(item.id))) {
+    notifyInstructors({
+      title: '새 피드백',
+      body: '레슨생 피드백이 도착했습니다.',
+      url: '/',
+      tag: 'feedback-new',
+    });
+  }
 }
 
 function account(uid) {
@@ -304,6 +398,9 @@ function lanIps() {
 
 function isHubRoute(method, pathname) {
   if (pathname === '/health' || pathname === '/view' || pathname === '/blob') return true;
+  if (pathname === '/push-vapid' || pathname === '/push-subscribe' || pathname === '/push-unsubscribe' || pathname === '/push-test') {
+    return true;
+  }
   if (pathname === '/auth' && method === 'POST') return true;
   if (pathname === '/files' || pathname.startsWith('/files/')) return true;
   if (pathname === '/lib.js' || pathname === '/lib.mjs' || pathname === '/sw.js') return true;
@@ -388,7 +485,65 @@ const server = createServer(async (req, res) => {
         hub: ips.map((ip) => `http://${ip}:${PORT}`),
         public: publicUrls,
         expo: `http://localhost:${EXPO_PORT}`,
+        push: pushReady(),
       });
+      return;
+    }
+    if (req.method === 'GET' && url.pathname === '/push-vapid') {
+      send(res, 200, { publicKey: vapidPublicKey(), ready: pushReady() });
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/push-subscribe') {
+      const body = await readBody(req);
+      const acc = account(body.uid);
+      if (!acc) {
+        send(res, 403, { error: '로그인한 뒤 알림을 켜 주세요.' });
+        return;
+      }
+      state.pushSubscriptions = upsertSubscription(
+        state.pushSubscriptions,
+        acc.uid,
+        acc.role,
+        body.subscription,
+        acc.studentId
+      );
+      if (!state.pushSubscriptions.some((item) => item.endpoint === body.subscription?.endpoint)) {
+        send(res, 400, { error: '이 브라우저의 푸시 구독을 저장하지 못했습니다.' });
+        return;
+      }
+      saveSubscriptions();
+      send(res, 200, { ok: true, push: true });
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/push-unsubscribe') {
+      const body = await readBody(req);
+      const endpoint = body.subscription?.endpoint || body.endpoint;
+      state.pushSubscriptions = removeSubscription(state.pushSubscriptions, {
+        uid: body.uid,
+        endpoint,
+      });
+      saveSubscriptions();
+      send(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/push-test') {
+      const body = await readBody(req);
+      const acc = account(body.uid);
+      if (!acc) {
+        send(res, 403, { error: '로그인한 뒤 테스트 알림을 보낼 수 있습니다.' });
+        return;
+      }
+      const result = await dispatchPush((item) => item.uid === acc.uid, {
+        title: '쟝쟝 알림 테스트',
+        body: '앱을 닫아도 이 알림이 오면 백그라운드 푸시가 연결된 것입니다.',
+        url: acc.role === 'instructor' ? '/teach' : '/',
+        tag: 'jyang-jyang-test',
+      });
+      if (!result.sent) {
+        send(res, 400, { error: '이 기기의 푸시 구독이 없습니다. 알림 켜기를 다시 눌러 주세요.' });
+        return;
+      }
+      send(res, 200, { ok: true, sent: result.sent });
       return;
     }
     if (req.method === 'GET' && url.pathname === '/m') {
@@ -490,6 +645,9 @@ const server = createServer(async (req, res) => {
       }
       if (incoming.removedStudents !== undefined) {
         state.removedStudents = mergeRemovedStudents(state.removedStudents, incoming.removedStudents);
+      }
+      if (incoming.pushSubscriptions !== undefined) {
+        state.pushSubscriptions = mergePushSubscriptions(state.pushSubscriptions, incoming.pushSubscriptions);
       }
       if (incoming.students !== undefined) {
         const liveIds = new Set((state.students || []).map((s) => s.id));
@@ -876,10 +1034,13 @@ const server = createServer(async (req, res) => {
         state.feedback = mergeFeedback(state.feedback, [item]);
         state.feedback = dropRemovedFeedback(state.feedback, state.removedFeedback);
         bump();
+        notifyInstructors({
+          title: '새 피드백',
+          body: '레슨생 피드백이 도착했습니다.',
+          url: '/',
+          tag: `feedback-${item.id}`,
+        });
         send(res, 200, { uid: acc.uid, view: viewFor(acc.uid) });
-        return;
-      }
-      if (action === 'remove-feedback') {
         if (!isInstructor(body.uid)) {
           send(res, 403, { error: '강사만 피드백을 지울 수 있습니다.' });
           return;
@@ -956,6 +1117,12 @@ const server = createServer(async (req, res) => {
               r.id === open.id ? applyStudentChange(r, slot, session) : r
             );
             bump();
+            notifyInstructors({
+              title: '보강 변경',
+              body: makeupPushBody({ ...open, date: slot.date, time: slot.startTime, studentName: card.name }),
+              url: `/student/${card.id}`,
+              tag: `makeup-${open.id}`,
+            });
             send(res, 200, { uid: acc.uid, view: viewFor(acc.uid) });
           } catch (err) {
             send(res, 400, { error: String(err.message || err) });
@@ -981,6 +1148,12 @@ const server = createServer(async (req, res) => {
         };
         state.requests = [item, ...(state.requests || [])];
         bump();
+        notifyInstructors({
+          title: '보강 신청',
+          body: makeupPushBody(item),
+          url: `/student/${item.studentId}`,
+          tag: `makeup-${item.id}`,
+        });
         send(res, 200, { uid: acc.uid, view: viewFor(acc.uid) });
         return;
       }
@@ -1014,6 +1187,12 @@ const server = createServer(async (req, res) => {
             state.requests = (state.requests || []).map((r) => (r.id === req.id ? applyStudentChange(r, slot, session) : r));
           }
           bump();
+          notifyInstructors({
+            title: action === 'withdraw-makeup' ? '보강 철회' : '보강 변경',
+            body: makeupPushBody(req),
+            url: `/student/${req.studentId}`,
+            tag: `makeup-${req.id}`,
+          });
           send(res, 200, { uid: acc.uid, view: viewFor(acc.uid) });
         } catch (err) {
           send(res, 400, { error: String(err.message || err) });
@@ -1037,6 +1216,14 @@ const server = createServer(async (req, res) => {
         state.openSlots = applyDecideToSlots(state.openSlots || [], req, accepted, nextRequests);
         state.students = applyDecideToStudents(state.students, req, accepted, state.closures);
         bump();
+        notifyStudent(req.studentId, {
+          title: accepted ? '보강 수락' : '보강 거절',
+          body: accepted
+            ? '신청한 보강이 수락되었습니다.'
+            : '신청한 보강이 거절되었습니다.',
+          url: '/',
+          tag: `makeup-${req.id}`,
+        });
         send(res, 200, { uid: body.uid, view: viewFor(body.uid) });
         return;
       }
@@ -1067,6 +1254,17 @@ const server = createServer(async (req, res) => {
           state.openSlots = applyReviseToSlots(state.openSlots || [], requests, req, revise);
           state.students = applyReviseToStudents(state.students, req, revise, state.closures);
           bump();
+          notifyStudent(req.studentId, {
+            title: revise === 'accept' ? '보강 수락' : revise === 'decline' ? '보강 거절' : '보강 철회',
+            body:
+              revise === 'accept'
+                ? '보강 일정이 수락으로 변경되었습니다.'
+                : revise === 'decline'
+                  ? '보강 일정이 거절로 변경되었습니다.'
+                  : '보강 일정이 철회되었습니다.',
+            url: '/',
+            tag: `makeup-${req.id}`,
+          });
           send(res, 200, { uid: body.uid, view: viewFor(body.uid) });
         } catch (err) {
           send(res, 400, { error: String(err.message || err) });
@@ -1105,6 +1303,7 @@ const server = createServer(async (req, res) => {
           );
         }
         state.accounts = state.accounts.filter((a) => a.uid !== acc.uid);
+        state.pushSubscriptions = removeSubscription(state.pushSubscriptions, { uid: acc.uid });
         bump();
         send(res, 200, { uid: null, view: publicView() });
         return;

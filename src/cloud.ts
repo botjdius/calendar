@@ -6,6 +6,7 @@ import {
   stripDataUriAttachments,
 } from './fileCloud.mjs';
 import { emptyShared, isEphemeralHubUrl, mergeBanks, packBanks, type SharedBlob } from './hub';
+import { mergePushSubscriptions } from './pushStore';
 import type { Account, AnonymousFeedback, MakeupRequest, RemovedStudent, Student } from './types';
 
 export const CLOUD_URL =
@@ -525,6 +526,7 @@ export function mergeStudio(current: StudioCloud | null, incoming: StudioCloud):
     accounts,
     hubPublicUrl: durableHubUrl(incoming.hubPublicUrl) || durableHubUrl(current.hubPublicUrl),
     removedStudents,
+    pushSubscriptions: mergePushSubscriptions(current.pushSubscriptions, incoming.pushSubscriptions),
   };
 }
 
@@ -567,6 +569,7 @@ export async function studioFromShared(shared: SharedBlob): Promise<StudioCloud>
     accounts,
     hubPublicUrl: durableHubUrl(shared.hubPublicUrl),
     removedStudents: mergeRemovedStudents([], shared.removedStudents),
+    pushSubscriptions: mergePushSubscriptions([], shared.pushSubscriptions),
   };
 }
 
@@ -636,6 +639,7 @@ function parseStudio(data: unknown): StudioCloud | null {
     ...packBanks(body.bank, body.banks),
     hubPublicUrl: durableHubUrl(typeof body.hubPublicUrl === 'string' ? body.hubPublicUrl : ''),
     removedStudents: Array.isArray(body.removedStudents) ? body.removedStudents : [],
+    pushSubscriptions: Array.isArray(body.pushSubscriptions) ? body.pushSubscriptions : [],
   };
 }
 

@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { emptyBank } from './bank';
+import { mergePushSubscriptions, type PushSubscriptionRecord } from './pushStore';
 import type { Account, AnonymousFeedback, BankAccount, Closure, MakeupRequest, OpenSlot, RemovedStudent, Student } from './types';
 
 export { BANK_MAX, bankLabel, emptyBank, mergeBanks, packBanks } from './bank';
@@ -24,6 +25,7 @@ export type SharedBlob = {
   banks?: BankAccount[];
   hubPublicUrl?: string;
   removedStudents?: RemovedStudent[];
+  pushSubscriptions?: PushSubscriptionRecord[];
 };
 
 export const emptyShared = (): SharedBlob => ({
@@ -40,6 +42,7 @@ export const emptyShared = (): SharedBlob => ({
   bank: emptyBank(),
   banks: [],
   removedStudents: [],
+  pushSubscriptions: [],
 });
 
 function pageHost(): string {
@@ -212,4 +215,32 @@ export async function hubAuth(
     uid: data.uid ?? null,
     view: { ...emptyShared(), ...data.view },
   };
+}
+
+export async function fetchVapidPublicKey(base: string) {
+  const res = await timedFetch(`${base}/push-vapid`);
+  const data = await parse(res, '알림 키를 읽지 못했습니다.');
+  return String(data.publicKey || '');
+}
+
+export async function savePushSubscription(
+  base: string,
+  uid: string,
+  subscription: PushSubscriptionJSON
+) {
+  const res = await timedFetch(`${base}/push-subscribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uid, subscription }),
+  });
+  await parse(res, '푸시 구독을 저장하지 못했습니다.');
+}
+
+export async function requestHubPushTest(base: string, uid: string) {
+  const res = await timedFetch(`${base}/push-test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uid }),
+  });
+  await parse(res, '테스트 알림을 보내지 못했습니다.');
 }

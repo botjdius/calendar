@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { mergePushSubscriptions } from './pushStore.mjs';
 import { mergeBanks, packBanks } from './bank.mjs';
 import {
   droppedAttachmentIds,
@@ -437,6 +438,7 @@ export function mergeStudio(current, incoming) {
     accounts,
     hubPublicUrl: durableHubUrl(incoming.hubPublicUrl) || durableHubUrl(current.hubPublicUrl),
     removedStudents,
+    pushSubscriptions: mergePushSubscriptions(current.pushSubscriptions, incoming.pushSubscriptions),
   };
 }
 
@@ -454,6 +456,7 @@ export function studioFromState(state) {
     ...packBanks(state.bank, state.banks),
     hubPublicUrl: durableHubUrl(state.hubPublicUrl),
     removedStudents: mergeRemovedStudents([], state.removedStudents),
+    pushSubscriptions: state.pushSubscriptions || [],
     accounts: (state.accounts || [])
       .map((account) => {
         if (account.role === 'instructor') return publicInstructor(account);
@@ -503,6 +506,7 @@ function parseStudio(data) {
       accounts: Array.isArray(data.accounts) ? data.accounts : [],
       hubPublicUrl: durableHubUrl(typeof data.hubPublicUrl === 'string' ? data.hubPublicUrl : ''),
       removedStudents: Array.isArray(data.removedStudents) ? data.removedStudents : [],
+      pushSubscriptions: Array.isArray(data.pushSubscriptions) ? data.pushSubscriptions : [],
     };
 }
 
