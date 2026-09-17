@@ -1,17 +1,22 @@
 {
+  "id": "/",
   "short_name": "쟝쟝",
   "name": "쟝쟝 · Jyang JyanG",
+  "description": "쟝쟝 기타 레슨 일정과 수업 자료를 관리합니다.",
+  "lang": "ko-KR",
+  "dir": "ltr",
   "icons": [
     {
       "src": "/icon-192.png",
       "type": "image/png",
-      "sizes": "192x192"
+      "sizes": "192x192",
+      "purpose": "any"
     },
     {
       "src": "/icon-512.png",
       "type": "image/png",
       "sizes": "512x512",
-      "purpose": "any"
+      "purpose": "any maskable"
     },
     {
       "src": "/apple-touch-icon.png",
@@ -20,7 +25,10 @@
     }
   ],
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait",
   "theme_color": "#F3EDE3",
-  "background_color": "#FFFFFF"
+  "background_color": "#F3EDE3",
+  "categories": ["education", "productivity"]
 }

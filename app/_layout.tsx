@@ -5,6 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { IosSafariGap } from '../src/IosSafariGap';
 import { StoreProvider } from '../src/store';
 import { colors } from '../src/theme';
+import { WebPushListener } from '../src/WebPushListener';
 
 export default function RootLayout() {
   return (
@@ -12,6 +13,7 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <StoreProvider>
           <IosSafariGap />
+          <WebPushListener />
           <StatusBar style="dark" />
           <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }} />
         </StoreProvider>

@@ -5,6 +5,7 @@ import { StudentFeedbackBox } from '../../src/StudentFeedbackBox';
 import { useStore } from '../../src/store';
 import { colors } from '../../src/theme';
 import { AccountCopy, Button, Card, Fold, Screen } from '../../src/ui';
+import { WebPushSettings } from '../../src/WebPushSettings';
 
 export default function StudentSettings() {
   const { bank, banks, signOut, deleteMyAccount, sendFeedback } = useStore();
@@ -36,6 +37,7 @@ export default function StudentSettings() {
               <StudentFeedbackBox onSend={sendFeedback} />
             </Fold>
           </Card>
+          <WebPushSettings />
           <Button tone="wine" label="로그아웃" onPress={() => signOut()} />
           <Button tone="ghost" label="탈퇴" onPress={confirmLeave} />
           <ScrollPad />

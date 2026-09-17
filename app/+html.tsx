@@ -29,10 +29,13 @@ export default function Root({ children }: { children: React.ReactNode }) {
         <meta name="theme-color" content="#F3EDE3" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="쟝쟝" />
+        <meta name="application-name" content="쟝쟝" />
         <link rel="manifest" href="/manifest.json" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+        <script dangerouslySetInnerHTML={{ __html: serviceWorkerRegistration }} />
         <ScrollViewStyleReset />
         <style dangerouslySetInnerHTML={{ __html: css }} />
       </head>
@@ -40,3 +43,13 @@ export default function Root({ children }: { children: React.ReactNode }) {
     </html>
   );
 }
+
+const serviceWorkerRegistration = `
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function (error) {
+        console.error('Service worker registration failed:', error);
+      });
+    });
+  }
+`;

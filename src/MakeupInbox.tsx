@@ -42,13 +42,6 @@ export function MakeupInbox() {
 
   useEffect(() => {
     if (user?.role !== 'instructor') return;
-    if (Platform.OS === 'web' && typeof Notification !== 'undefined' && Notification.permission === 'default') {
-      Notification.requestPermission().catch(() => {});
-    }
-  }, [user?.role]);
-
-  useEffect(() => {
-    if (user?.role !== 'instructor') return;
     const ids = pending.map((r) => r.id);
     if (seenRef.current === null) {
       seenRef.current = new Set(ids);

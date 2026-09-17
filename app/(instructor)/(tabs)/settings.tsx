@@ -11,6 +11,7 @@ import { useStore } from '../../../src/store';
 import { colors } from '../../../src/theme';
 import type { BankAccount, Student } from '../../../src/types';
 import { AccountCopy, Button, Card, Field, Fold, Pill, Screen } from '../../../src/ui';
+import { WebPushSettings } from '../../../src/WebPushSettings';
 
 function blankAccount(): BankAccount {
   return { ...emptyBank(), id: `new-${Date.now().toString(36)}` };
@@ -200,6 +201,7 @@ export default function Settings() {
             <Text style={{ color: colors.muted, lineHeight: 22 }}>{syncLabel}</Text>
             </Fold>
           </Card>
+          <WebPushSettings />
           <PhoneConnect />
           <Card>
             <Fold title="강사 코드">
