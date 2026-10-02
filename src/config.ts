@@ -1,6 +1,6 @@
 export const INSTRUCTOR_INVITE_CODE = 'JYANG-TEACHER';
 export const APP_NAME = '쟝쟝';
-export const APP_NAME_EN = 'Jyang JyanG';
+export const APP_NAME_EN = 'Jyang Jyang';
 export const DEFAULT_SESSION_COUNT = 4;
 
 export const firebaseConfig = {

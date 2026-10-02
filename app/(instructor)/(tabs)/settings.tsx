@@ -4,6 +4,7 @@ import { Alert, Platform, Pressable, ScrollView, Text, View } from 'react-native
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BANK_MAX, bankLabel, emptyBank, packBanks } from '../../../src/hub';
 import { INSTRUCTOR_INVITE_CODE } from '../../../src/config';
+import { AnnouncementSender } from '../../../src/AnnouncementSender';
 import { PhoneConnect } from '../../../src/PhoneConnect';
 import { ScrollPad } from '../../../src/ScrollPad';
 import { StudentRosterList } from '../../../src/StudentRosterList';
@@ -33,6 +34,7 @@ export default function Settings() {
   const [busyDelete, setBusyDelete] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const bankTouched = useRef(false);
+  const appRegisteredCount = students.filter((student) => Boolean(student.linkedUid)).length;
 
   useEffect(() => {
     if (user?.name) setInstructorName(user.name);
@@ -57,9 +59,9 @@ export default function Settings() {
       <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
         <Screen title="설정" subtitle="강사는 모든 레슨생 자료를 볼 수 있습니다.">
           <Card>
-            <Fold title={`등록 레슨생 ${students.length}명`} defaultOpen>
+            <Fold title={`등록 레슨생 ${students.length}명 · 앱 등록 ${appRegisteredCount}명`}>
             <Text style={{ color: colors.muted, fontWeight: '700', lineHeight: 22 }}>
-              이름을 누르면 레슨 상세로 갑니다. 우클릭(휴대폰은 길게 누르기)하면 삭제 창이 열립니다.
+              앱 등록은 레슨생이 가입코드로 연결한 상태입니다. 이름을 누르면 상세로 가고, 휴대폰에서 길게 누르면 삭제 창이 열립니다.
             </Text>
             <StudentRosterList
               students={students}
@@ -93,6 +95,9 @@ export default function Settings() {
               }}
             />
             </Fold>
+          </Card>
+          <Card>
+            <AnnouncementSender students={students} />
           </Card>
           <Card>
             <Fold title={feedback.length ? `익명 피드백 (${feedback.length})` : '익명 피드백'}>

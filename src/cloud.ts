@@ -7,7 +7,8 @@ import {
 } from './fileCloud.mjs';
 import { emptyShared, isEphemeralHubUrl, mergeBanks, packBanks, type SharedBlob } from './hub';
 import { mergePushSubscriptions } from './pushStore';
-import type { Account, AnonymousFeedback, MakeupRequest, RemovedStudent, Student } from './types';
+import { dedupeHolidaySessions } from './schedule';
+import type { Account, Announcement, AnonymousFeedback, MakeupRequest, RemovedStudent, Student } from './types';
 
 export const CLOUD_URL =
   process.env.EXPO_PUBLIC_CLOUD_URL || 'https://extendsclass.com/api/json-storage/bin/ebefede';
@@ -59,6 +60,30 @@ export function mergeById<T extends { id: string }>(
     if (!item?.id) continue;
     const prev = map.get(item.id);
     if (!prev || incomingNewer) map.set(item.id, item);
+  }
+  return [...map.values()];
+}
+
+export function mergeAnnouncements(
+  current?: Announcement[],
+  incoming?: Announcement[],
+  incomingNewer = false
+): Announcement[] {
+  const map = new Map<string, Announcement>();
+  for (const item of [...(current || []), ...(incoming || [])]) {
+    if (!item?.id) continue;
+    const prev = map.get(item.id);
+    if (!prev) {
+      map.set(item.id, item);
+      continue;
+    }
+    if (prev.deletedAt || item.deletedAt) {
+      const deleted =
+        String(item.deletedAt || '') >= String(prev.deletedAt || '') ? item : prev;
+      map.set(item.id, { ...(incomingNewer ? item : prev), ...deleted, deletedAt: deleted.deletedAt });
+      continue;
+    }
+    if (incomingNewer) map.set(item.id, item);
   }
   return [...map.values()];
 }
@@ -228,14 +253,43 @@ function mergeText(preferred: string | undefined, fallback: string | undefined) 
   return next || prev;
 }
 
+export function mergeRemovedSessionIds(current?: string[], incoming?: string[]): string[] {
+  return [
+    ...new Set(
+      [...(current || []), ...(incoming || [])]
+        .map((id) => String(id || '').trim())
+        .filter(Boolean)
+    ),
+  ].sort();
+}
+
+function dropRemovedSessions(student: Student): Student {
+  const removedSessionIds = mergeRemovedSessionIds([], student.removedSessionIds);
+  const removed = new Set(removedSessionIds);
+  return {
+    ...student,
+    sessions: dedupeHolidaySessions(
+      (student.sessions || []).filter(
+        (session) => session?.id && !removed.has(session.id)
+      )
+    ),
+    removedSessionIds,
+  };
+}
+
 function mergeStudent(prev: Student, incoming: Student, incomingNewer: boolean): Student {
   const preferIncoming = incomingNewer;
+  const removedSessionIds = mergeRemovedSessionIds(
+    prev.removedSessionIds,
+    incoming.removedSessionIds
+  );
+  const removedSessions = new Set(removedSessionIds);
   const sessions = new Map<string, Student['sessions'][number]>();
   for (const session of prev.sessions || []) {
-    if (session?.id) sessions.set(session.id, session);
+    if (session?.id && !removedSessions.has(session.id)) sessions.set(session.id, session);
   }
   for (const session of incoming.sessions || []) {
-    if (!session?.id) continue;
+    if (!session?.id || removedSessions.has(session.id)) continue;
     const older = sessions.get(session.id);
     if (!older) {
       sessions.set(session.id, session);
@@ -272,7 +326,8 @@ function mergeStudent(prev: Student, incoming: Student, incomingNewer: boolean):
     ...preferred,
     linkedUid: preferred.linkedUid || other.linkedUid,
     joinCode: preferred.joinCode || other.joinCode,
-    sessions: [...sessions.values()],
+    sessions: dedupeHolidaySessions([...sessions.values()]),
+    removedSessionIds,
   };
 }
 
@@ -283,12 +338,15 @@ export function mergeStudents(
 ): Student[] {
   const map = new Map<string, Student>();
   for (const student of current || []) {
-    if (student?.id) map.set(student.id, student);
+    if (student?.id) map.set(student.id, dropRemovedSessions(student));
   }
   for (const student of incoming || []) {
     if (!student?.id) continue;
     const prev = map.get(student.id);
-    map.set(student.id, prev ? mergeStudent(prev, student, incomingNewer) : student);
+    map.set(
+      student.id,
+      prev ? mergeStudent(prev, student, incomingNewer) : dropRemovedSessions(student)
+    );
   }
   return [...map.values()];
 }
@@ -412,6 +470,21 @@ export function liveStudents(students: Student[] | undefined, removed?: RemovedS
   return (students || []).filter((student) => !isStudentRemoved(removed, student));
 }
 
+export function announcementsForStudent<T extends { studentIds?: string[]; createdAt?: string; expiresOn?: string; deletedAt?: string }>(
+  announcements: T[] | undefined,
+  studentId?: string,
+  onDate?: string
+): T[] {
+  if (!studentId) return [];
+  return (announcements || []).filter((item) => {
+    if (item.deletedAt) return false;
+    if (!(item.studentIds || []).includes(studentId)) return false;
+    if (!onDate) return true;
+    const expiresOn = String(item.expiresOn || item.createdAt || '').slice(0, 10);
+    return !expiresOn || expiresOn >= onDate;
+  });
+}
+
 export function dropStudentsMissingFrom(current: Student[] | undefined, incoming: Student[] | undefined): Student[] {
   const liveIds = new Set((incoming || []).map((student) => student.id).filter(Boolean));
   if (!liveIds.size) return current || [];
@@ -480,6 +553,7 @@ export function mergeStudio(current: StudioCloud | null, incoming: StudioCloud):
         (incoming.requests || []).filter((item) => liveIds.has(item.studentId)),
         incoming.removedRequests
       ),
+      announcements: mergeAnnouncements([], incoming.announcements || [], true),
       removedFeedback: mergeRemovedFeedback([], incoming.removedFeedback),
       removedRequests: mergeRemovedRequests([], incoming.removedRequests),
       removedOpenSlots: mergeRemovedOpenSlots([], incoming.removedOpenSlots),
@@ -515,6 +589,7 @@ export function mergeStudio(current: StudioCloud | null, incoming: StudioCloud):
       mergeRequests(current.requests, incoming.requests).filter((item) => liveIds.has(item.studentId)),
       mergeRemovedRequests(current.removedRequests, incoming.removedRequests)
     ),
+    announcements: mergeAnnouncements(current.announcements, incoming.announcements || [], incomingNewer),
     removedFeedback: mergeRemovedFeedback(current.removedFeedback, incoming.removedFeedback),
     removedRequests: mergeRemovedRequests(current.removedRequests, incoming.removedRequests),
     removedOpenSlots,
@@ -561,6 +636,7 @@ export async function studioFromShared(shared: SharedBlob): Promise<StudioCloud>
     closures: shared.closures || [],
     openSlots: dropRemovedOpenSlots(shared.openSlots, shared.removedOpenSlots),
     requests: dropRemovedRequests(shared.requests, shared.removedRequests),
+    announcements: shared.announcements || [],
     removedFeedback: mergeRemovedFeedback([], shared.removedFeedback),
     removedRequests: mergeRemovedRequests([], shared.removedRequests),
     removedOpenSlots: mergeRemovedOpenSlots([], shared.removedOpenSlots),
@@ -627,6 +703,7 @@ function parseStudio(data: unknown): StudioCloud | null {
       Array.isArray(body.requests) ? body.requests : [],
       Array.isArray(body.removedRequests) ? body.removedRequests : []
     ),
+    announcements: Array.isArray(body.announcements) ? body.announcements : [],
     removedFeedback: Array.isArray(body.removedFeedback) ? body.removedFeedback.map((id) => String(id || '').trim()).filter(Boolean) : [],
     removedRequests: Array.isArray(body.removedRequests) ? body.removedRequests.map((id) => String(id || '').trim()).filter(Boolean) : [],
     removedOpenSlots: Array.isArray(body.removedOpenSlots)

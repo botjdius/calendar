@@ -27,6 +27,7 @@ import {
   useState,
 } from 'react';
 import {
+  announcementsForStudent,
   applyStudentWrite,
   dropStudentsMissingFrom,
   fetchCloud,
@@ -34,6 +35,7 @@ import {
   isCloudConfigured,
   joinCodeBlocked,
   liveStudents,
+  mergeAnnouncements,
   mergeById,
   mergeCloudAccounts,
   mergeFeedback,
@@ -44,6 +46,7 @@ import {
   mergeRemovedFeedback,
   mergeRemovedOpenSlots,
   mergeRemovedRequests,
+  mergeRemovedSessionIds,
   mergeRemovedStudents,
   mergeRequests,
   mergeStudents,
@@ -57,9 +60,10 @@ import { INSTRUCTOR_INVITE_CODE, isFirebaseConfigured } from './config';
 import { externalizeStudents, isFilePointer, releaseFilePointer } from './fileCloud.mjs';
 import { auth, db } from './firebase';
 import { discoverHub, emptyBank, emptyShared, fetchBlob, hubAuth, isEphemeralHubUrl, mergeBanks, packBanks, probeHub, putBlob, rememberHubUrl, rememberPublicHubUrl, savedHubUrl, type SharedBlob } from './hub';
-import { feedbackInstructorPush, makeupInstructorPush, makeupStudentPush, notifyRemotePush } from './pushNotify';
+import { feedbackInstructorPush, makeupInstructorPush, makeupStudentPush, notifyClosureStudents, notifyOpenSlotStudents, notifyRemotePush } from './pushNotify';
 import { mergePushSubscriptions } from './pushStore';
 import { applyRemoveStudent, requestsForLiveStudents } from './studentRoster';
+import { sendCloudPush } from './cloudPush';
 import { enableWebPush, showWebPushTest, type WebPushResult } from './webPush';
 import { pickAndUploadSessionFile } from './files';
 import {
@@ -100,12 +104,14 @@ import {
   claimedSlotIds,
   findReusableMakeup,
   makeupIntent,
+  makeupWithdrawBlockReason,
   nowIso,
   reviseMakeupBlockReason,
   type MakeupReviseAction,
 } from './makeup';
 import type {
   Account,
+  Announcement,
   AnonymousFeedback,
   AppUser,
   BankAccount,
@@ -154,6 +160,7 @@ type Store = {
   closures: Closure[];
   openSlots: OpenSlot[];
   requests: MakeupRequest[];
+  announcements: Announcement[];
   feedback: AnonymousFeedback[];
   bank: BankAccount;
   banks: BankAccount[];
@@ -211,6 +218,8 @@ type Store = {
   requestMakeup: (slotId: string, sessionId: string) => Promise<void>;
   changeMakeup: (requestId: string, slotId: string, sessionId: string) => Promise<void>;
   withdrawMakeup: (requestId: string) => Promise<void>;
+  sendAnnouncement: (input: { title: string; body: string; studentIds: string[]; expiresOn: string }) => Promise<number>;
+  removeAnnouncement: (id: string) => Promise<void>;
   sendFeedback: (body: string) => Promise<void>;
   removeFeedback: (id: string) => Promise<void>;
   decideMakeup: (requestId: string, accepted: boolean) => Promise<void>;
@@ -302,6 +311,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [closures, setClosures] = useState<Closure[]>([]);
   const [openSlots, setOpenSlotsState] = useState<OpenSlot[]>([]);
   const [requests, setRequestsState] = useState<MakeupRequest[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [feedback, setFeedbackState] = useState<AnonymousFeedback[]>([]);
   const [bank, setBank] = useState<BankAccount>(emptyBank());
   const [banks, setBanks] = useState<BankAccount[]>([]);
@@ -374,6 +384,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const revoked = studentSessionRevoked(uid, shared.accounts, live, removed);
     if (revoked) {
       setRequests([]);
+      setAnnouncements([]);
       setStudents([]);
       setClosures([]);
       setOpenSlots([]);
@@ -388,6 +399,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     rememberRemovedRequests(shared.removedRequests);
     rememberRemovedOpenSlots(shared.removedOpenSlots);
     setRequests(requestsForLiveStudents(nextRequests, live));
+    setAnnouncements((current) =>
+      opts?.replace
+        ? shared.announcements || []
+        : mergeAnnouncements(current, shared.announcements || [], true)
+    );
     showFeedback(shared.feedback, uid, shared.accounts, shared.removedFeedback);
     if (!incomplete) {
       const closuresNext = (shared.closures || []).map((c) => ({ ...c, scope: c.scope || 'all' }));
@@ -444,6 +460,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         removedOpenSlots
       ),
       requests,
+      announcements: mergeAnnouncements(latest.announcements, shared.announcements || [], true),
       feedback,
       removedFeedback,
       removedRequests,
@@ -455,6 +472,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dirty: incomplete ? latest.dirty || dirtyRef.current : false,
     });
     setRequests(requests);
+    setAnnouncements((current) => mergeAnnouncements(current, shared.announcements || [], true));
     showFeedback(feedback, uid, incomplete ? latest.accounts : shared.accounts || latest.accounts, removedFeedback);
     if (!incomplete) {
       dirtyRef.current = false;
@@ -476,6 +494,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         closures: local.closures,
         openSlots: local.openSlots,
         requests: local.requests,
+        announcements: local.announcements || [],
         feedback: local.feedback || [],
         ...packBanks(local.bank, local.banks),
         removedStudents: local.removedStudents || [],
@@ -511,6 +530,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       closures: local.closures,
       openSlots: local.openSlots,
       requests: local.requests,
+      announcements: local.announcements || [],
       feedback: local.feedback || [],
       ...packBanks(local.bank, local.banks),
       removedStudents: local.removedStudents || [],
@@ -572,8 +592,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     const local = await loadDevice();
     const mergedRequests = mergeRequests(mergeRequests(local.requests, requestsRef.current), cloud.requests);
+    const mergedAnnouncements = mergeAnnouncements(local.announcements, cloud.announcements || [], true);
     const mergedFeedback = mergeFeedback(mergeFeedback(local.feedback, feedbackRef.current), cloud.feedback);
     const requestsChanged = JSON.stringify(mergedRequests) !== JSON.stringify(local.requests || []);
+    const announcementsChanged = JSON.stringify(mergedAnnouncements) !== JSON.stringify(local.announcements || []);
     const feedbackChanged = JSON.stringify(mergedFeedback) !== JSON.stringify(local.feedback || []);
     const incomingNewer = (cloud.version || 0) > (local.version || dataVersionRef.current || 0);
     const latest = await loadDevice();
@@ -585,6 +607,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         mergeRequests(mergeRequests(latest.requests, requestsRef.current), cloud.requests),
         keptRemovedRequests
       );
+      const keptAnnouncements = mergeAnnouncements(latest.announcements, cloud.announcements || [], true);
       const keptFeedback = dropRemovedFeedback(
         mergeFeedback(mergeFeedback(latest.feedback, feedbackRef.current), cloud.feedback),
         keptRemovedFeedback
@@ -604,14 +627,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       const studentsChanged = JSON.stringify(keptStudents) !== JSON.stringify(latest.students || []);
       const keptRequestsChanged = JSON.stringify(kept) !== JSON.stringify(latest.requests || []);
+      const keptAnnouncementsChanged =
+        JSON.stringify(keptAnnouncements) !== JSON.stringify(latest.announcements || []);
       const keptFeedbackChanged = JSON.stringify(keptFeedback) !== JSON.stringify(latest.feedback || []);
       const keptOpenSlotsChanged = JSON.stringify(keptOpenSlots) !== JSON.stringify(latest.openSlots || []);
-      if (studentsChanged || keptRequestsChanged || keptFeedbackChanged || keptOpenSlotsChanged) {
+      if (studentsChanged || keptRequestsChanged || keptAnnouncementsChanged || keptFeedbackChanged || keptOpenSlotsChanged) {
         rememberRemovedOpenSlots(keptRemovedOpenSlots);
         await saveDevice({
           ...latest,
           students: keptStudents,
           requests: kept,
+          announcements: keptAnnouncements,
           feedback: keptFeedback,
           openSlots: keptOpenSlots,
           removedFeedback: keptRemovedFeedback,
@@ -621,6 +647,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         });
         setStudents(keptStudents.map((s) => normalizeStudent(s)));
         setRequests(kept);
+        setAnnouncements(keptAnnouncements);
         setOpenSlots(keptOpenSlots);
         showFeedback(keptFeedback, uid, latest.accounts, keptRemovedFeedback);
       }
@@ -646,7 +673,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       openSlotsNext = openSlotsNext.filter((item) => cloudIds.has(item.id));
     }
     const openSlotsChanged = JSON.stringify(openSlotsNext) !== JSON.stringify(latest.openSlots || []);
-    if (!force && !incomingNewer && !requestsChanged && !feedbackChanged && !studentsChanged && !openSlotsChanged) {
+    if (!force && !incomingNewer && !requestsChanged && !announcementsChanged && !feedbackChanged && !studentsChanged && !openSlotsChanged) {
       return false;
     }
     const next: LocalBlob = {
@@ -659,6 +686,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         mergeRequests(mergeRequests(latest.requests, requestsRef.current), cloud.requests),
         mergeRemovedRequests(latest.removedRequests, cloud.removedRequests)
       ),
+      announcements: mergeAnnouncements(latest.announcements, cloud.announcements || [], incomingNewer || force),
       feedback: dropRemovedFeedback(
         mergeFeedback(mergeFeedback(latest.feedback, feedbackRef.current), cloud.feedback),
         removedFeedback
@@ -678,7 +706,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     dataVersionRef.current = next.version || 0;
     if (!hubBase.current) setSyncMode('cloud');
     const role = next.accounts.find((a) => a.uid === uid)?.role;
-    if (hubBase.current && uid && (requestsChanged || feedbackChanged) && role === 'instructor') {
+    if (hubBase.current && uid && (requestsChanged || announcementsChanged || feedbackChanged) && role === 'instructor') {
       try {
         const saved = await putBlob(hubBase.current, uid, {
           accounts: next.accounts,
@@ -686,6 +714,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           closures: next.closures,
           openSlots: next.openSlots,
           requests: next.requests,
+          announcements: next.announcements || [],
           feedback: next.feedback || [],
           ...packBanks(next.bank, next.banks),
           removedStudents: next.removedStudents || [],
@@ -729,11 +758,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           mergeRequests(mergeRequests(local.requests, requestsRef.current), next.requests),
           cloud?.requests
         );
+        const incomingAnnouncements = mergeAnnouncements(
+          mergeAnnouncements(local.announcements, next.announcements || [], true),
+          cloud?.announcements || [],
+          true
+        );
         const incomingFeedback = mergeFeedback(
           mergeFeedback(mergeFeedback(local.feedback, feedbackRef.current), next.feedback),
           cloud?.feedback
         );
         const requestsChanged = JSON.stringify(incomingRequests) !== JSON.stringify(local.requests || []);
+        const announcementsChanged =
+          JSON.stringify(incomingAnnouncements) !== JSON.stringify(local.announcements || []);
         const feedbackChanged = JSON.stringify(incomingFeedback) !== JSON.stringify(local.feedback || []);
         const removedOpenSlots = mergeRemovedOpenSlots(
           local.removedOpenSlots,
@@ -750,18 +786,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const openSlotsChanged = JSON.stringify(incomingSlots) !== JSON.stringify(local.openSlots || []);
         const incomplete = Boolean(sessionUidRef.current) && !(next.accounts || []).some((a) => a.uid === sessionUidRef.current);
         const versionChanged = !incomplete && (next.version || 0) !== dataVersionRef.current;
-        if (!versionChanged && !requestsChanged && !feedbackChanged && !openSlotsChanged) return;
+        if (!versionChanged && !requestsChanged && !announcementsChanged && !feedbackChanged && !openSlotsChanged) return;
         if (dirtyRef.current || incomplete) {
-          if (requestsChanged || feedbackChanged || openSlotsChanged) {
+          if (requestsChanged || announcementsChanged || feedbackChanged || openSlotsChanged) {
             rememberRemovedOpenSlots(removedOpenSlots);
             await saveDevice({
               ...local,
               requests: incomingRequests,
+              announcements: incomingAnnouncements,
               feedback: incomingFeedback,
               openSlots: incomingSlots,
               removedOpenSlots,
             });
             setRequests(incomingRequests);
+            setAnnouncements(incomingAnnouncements);
             setOpenSlots(incomingSlots);
             showFeedback(incomingFeedback, sessionUidRef.current, local.accounts);
           }
@@ -777,13 +815,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           setOpenSlots(incomingSlots);
         }
         setRequests(incomingRequests);
+        setAnnouncements(incomingAnnouncements);
         showFeedback(incomingFeedback, sessionUidRef.current, next.accounts?.length ? next.accounts : local.accounts);
         await cacheHubView(
           versionChanged
-            ? { ...next, requests: incomingRequests, feedback: incomingFeedback, openSlots: incomingSlots, removedOpenSlots }
+            ? { ...next, requests: incomingRequests, announcements: incomingAnnouncements, feedback: incomingFeedback, openSlots: incomingSlots, removedOpenSlots }
             : {
                 ...local,
                 requests: incomingRequests,
+                announcements: incomingAnnouncements,
                 feedback: incomingFeedback,
                 openSlots: incomingSlots,
                 removedOpenSlots,
@@ -813,6 +853,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         closures: local.closures,
         openSlots: local.openSlots,
         requests: local.requests,
+        announcements: local.announcements || [],
         feedback: local.feedback || [],
         ...packBanks(local.bank, local.banks),
         removedStudents: local.removedStudents || [],
@@ -1017,6 +1058,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const all = s.docs.map((d) => d.data() as MakeupRequest);
       setRequests(user.role === 'instructor' ? all : all.filter((r) => r.studentId === user.studentId));
     }));
+    unsubs.push(onSnapshot(collection(db, 'announcements'), (s) => {
+      const all = s.docs.map((d) => d.data() as Announcement);
+      setAnnouncements(
+        user.role === 'instructor'
+          ? all
+          : all.filter((item) => Boolean(user.studentId && item.studentIds.includes(user.studentId)))
+      );
+    }));
     unsubs.push(onSnapshot(doc(db, 'studio', 'bank'), (snap) => {
       const data = snap.exists() ? (snap.data() as BankAccount & { banks?: BankAccount[] }) : emptyBank();
       applyPacked(data, (data as { banks?: BankAccount[] }).banks);
@@ -1087,6 +1136,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           cloud ? mergeRequests(blob.requests, cloud.requests) : blob.requests,
           removedRequests
         ),
+        announcements: cloud
+          ? mergeAnnouncements(blob.announcements, cloud.announcements || [], incomingNewer)
+          : blob.announcements || [],
         feedback: dropRemovedFeedback(
           cloud ? mergeFeedback(blob.feedback, cloud.feedback) : blob.feedback || [],
           removedFeedback
@@ -1127,6 +1179,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             : base.requests,
           mergeRemovedRequests(base.removedRequests, patch.removedRequests)
         ),
+        announcements:
+          patch.announcements !== undefined
+            ? mergeAnnouncements(base.announcements, patch.announcements, true)
+            : base.announcements || [],
         feedback: dropRemovedFeedback(
           patch.feedback ? mergeFeedback(base.feedback, patch.feedback) : base.feedback,
           mergeRemovedFeedback(base.removedFeedback, patch.removedFeedback)
@@ -1173,6 +1229,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setClosures(next.closures);
       setOpenSlots(next.openSlots);
       setRequests(next.requests || []);
+      setAnnouncements(next.announcements || []);
       showFeedback(next.feedback, next.sessionUid, next.accounts, next.removedFeedback);
       applyPacked(next.bank, next.banks);
       const acc = next.accounts.find((a) => a.uid === next.sessionUid) ?? null;
@@ -1251,6 +1308,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const visibleSlots =
     user?.role === 'instructor' || myStudent ? openSlots.filter((slot) => !claimed.has(slot.id)) : [];
   const visibleRequests = user?.role === 'instructor' || myStudent ? requests : [];
+  const visibleAnnouncements =
+    user?.role === 'instructor'
+      ? announcements.filter((item) => !item.deletedAt)
+      : myStudent
+        ? announcementsForStudent(announcements, myStudent.id, todayIso())
+        : [];
 
   async function rememberUid(uid: string | null) {
     sessionUidRef.current = uid;
@@ -1391,6 +1454,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ),
           removedOpenSlots: mergeRemovedOpenSlots(shared.removedOpenSlots, cloud?.removedOpenSlots),
           requests: mergeRequests(shared.requests, cloud?.requests),
+          announcements: mergeAnnouncements(shared.announcements, cloud?.announcements || [], true),
           feedback: mergeFeedback(shared.feedback, cloud?.feedback),
           ...mergeBanks(cloud, shared),
           sessionUid: nextAcc.uid,
@@ -1518,6 +1582,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     closures: visibleClosures,
     openSlots: visibleSlots,
     requests: visibleRequests,
+    announcements: visibleAnnouncements,
     feedback: user?.role === 'instructor' ? feedback : [],
     bank,
     banks,
@@ -1628,6 +1693,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setClosures([]);
       setOpenSlots([]);
       setRequests([]);
+      setAnnouncements([]);
       setFeedback([]);
       removedFeedbackRef.current = [];
       removedRequestsRef.current = [];
@@ -1892,6 +1958,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       await api.patchStudent(studentId, {
         sessions: postponeOverlaps(aligned, st.time, holidays, st.weekday),
+        removedSessionIds: mergeRemovedSessionIds(st.removedSessionIds, [sessionId]),
       });
     },
     async setMakeup(studentId, sessionId, makeup) {
@@ -2009,15 +2076,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const end = input.endDate && input.endDate < input.date ? input.date : input.endDate || input.date;
       const item: Closure = { ...input, id: nid(), date: start, endDate: end, scope: input.scope || 'all' };
       const shared = await currentShared();
-      const studentsNext = applyAllHolidays(shared.students.map(normalizeStudent), [item, ...shared.closures]);
+      const roster = shared.students.map(normalizeStudent);
+      const studentsNext = applyAllHolidays(roster, [item, ...shared.closures]);
       if (firebaseOn) {
         await setDoc(doc(db!, 'closures', item.id), item);
         for (const st of studentsNext) {
           await updateDoc(doc(db!, 'students', st.id), { sessions: st.sessions });
         }
+        notifyClosureStudents(item, roster);
         return;
       }
       await persistShared({ closures: [item, ...shared.closures], students: studentsNext });
+      notifyClosureStudents(item, roster);
     },
     async removeClosure(id) {
       requireInstructor();
@@ -2033,10 +2103,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const item: OpenSlot = { ...input, id: nid() };
       if (firebaseOn) {
         await setDoc(doc(db!, 'openSlots', item.id), item);
-        return;
+      } else {
+        const shared = await currentShared();
+        await persistShared({ openSlots: [item, ...shared.openSlots] });
       }
-      const shared = await currentShared();
-      await persistShared({ openSlots: [item, ...shared.openSlots] });
+      notifyOpenSlotStudents(item, students);
     },
     async removeOpenSlot(id) {
       requireInstructor();
@@ -2185,6 +2256,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
     async withdrawMakeup(requestId) {
       if (!user || user.role !== 'student') throw new Error('레슨생만 보강 신청을 철회할 수 있습니다.');
+      const current = requests.find((r) => r.id === requestId);
+      if (!current) throw new Error('철회할 신청이 없습니다.');
+      const blocked = makeupWithdrawBlockReason(current);
+      if (blocked) throw new Error(blocked);
       if (firebaseOn) {
         const req = requests.find((r) => r.id === requestId);
         if (!req) throw new Error('철회할 신청이 없습니다.');
@@ -2224,6 +2299,64 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await persistShared({ requests: shared.requests || [] }, { skipCloud: true, replace: true });
         throw new Error('강사에게 철회를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.');
       }
+    },
+    async sendAnnouncement(input) {
+      requireInstructor();
+      const title = input.title.trim() || '쟝쟝 공지사항';
+      const body = input.body.trim();
+      const expiresOn = input.expiresOn.trim();
+      if (!body) throw new Error('공지 내용을 입력해 주세요.');
+      if (!expiresOn) throw new Error('공지 표시 종료일을 선택해 주세요.');
+      if (expiresOn < todayIso()) throw new Error('공지 표시 종료일은 오늘 이후로 선택해 주세요.');
+      const roster = await currentStudents();
+      const liveIds = new Set(roster.map((student) => student.id));
+      const studentIds = [...new Set(input.studentIds.map((id) => String(id || '').trim()))].filter(
+        (id) => id && liveIds.has(id)
+      );
+      if (!studentIds.length) throw new Error('공지사항을 받을 레슨생을 선택해 주세요.');
+      const item: Announcement = {
+        id: nid(),
+        title,
+        body,
+        studentIds,
+        createdAt: nowIso(),
+        expiresOn,
+      };
+      if (firebaseOn) {
+        await setDoc(doc(db!, 'announcements', item.id), item);
+      } else {
+        await persistShared({ announcements: [item] });
+      }
+      const targets = roster.filter((student) => studentIds.includes(student.id));
+      try {
+        const result = await sendCloudPush({
+          audience: 'students',
+          studentIds,
+          linkedUids: targets
+            .map((student) => student.linkedUid)
+            .filter((uid): uid is string => Boolean(uid)),
+          title,
+          body,
+          url: '/',
+          tag: `announcement-${item.id}`,
+        });
+        return result.sent;
+      } catch {
+        return 0;
+      }
+    },
+    async removeAnnouncement(id) {
+      requireInstructor();
+      const clean = String(id || '').trim();
+      if (!clean) return;
+      const current = announcements.find((item) => item.id === clean);
+      if (!current || current.deletedAt) return;
+      const removed: Announcement = { ...current, deletedAt: nowIso() };
+      if (firebaseOn) {
+        await updateDoc(doc(db!, 'announcements', clean), { deletedAt: removed.deletedAt });
+        return;
+      }
+      await persistShared({ announcements: [removed] });
     },
     async sendFeedback(text) {
       if (!user || user.role !== 'student') throw new Error('레슨생만 피드백을 보낼 수 있습니다.');

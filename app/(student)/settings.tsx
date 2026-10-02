@@ -33,7 +33,7 @@ export default function StudentSettings() {
             <AccountCopy bank={bank} banks={banks} embedded />
           </Card>
           <Card>
-            <Fold title="익명 피드백">
+            <Fold title="익명 피드백 보내기" plainTitle>
               <StudentFeedbackBox onSend={sendFeedback} />
             </Fold>
           </Card>

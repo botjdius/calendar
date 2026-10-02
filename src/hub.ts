@@ -3,7 +3,7 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { emptyBank } from './bank';
 import { mergePushSubscriptions, type PushSubscriptionRecord } from './pushStore';
-import type { Account, AnonymousFeedback, BankAccount, Closure, MakeupRequest, OpenSlot, RemovedStudent, Student } from './types';
+import type { Account, Announcement, AnonymousFeedback, BankAccount, Closure, MakeupRequest, OpenSlot, RemovedStudent, Student } from './types';
 
 export { BANK_MAX, bankLabel, emptyBank, mergeBanks, packBanks } from './bank';
 
@@ -17,6 +17,7 @@ export type SharedBlob = {
   closures: Closure[];
   openSlots: OpenSlot[];
   requests: MakeupRequest[];
+  announcements?: Announcement[];
   feedback?: AnonymousFeedback[];
   removedFeedback?: string[];
   removedRequests?: string[];
@@ -35,6 +36,7 @@ export const emptyShared = (): SharedBlob => ({
   closures: [],
   openSlots: [],
   requests: [],
+  announcements: [],
   feedback: [],
   removedFeedback: [],
   removedRequests: [],

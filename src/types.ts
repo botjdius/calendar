@@ -54,6 +54,7 @@ export type Student = {
   weeklyTime: string;
   startCycle: CycleIndex;
   sessions: LessonSession[];
+  removedSessionIds?: string[];
 };
 
 export type RemovedStudent = {
@@ -138,4 +139,14 @@ export type AnonymousFeedback = {
   id: string;
   body: string;
   createdAt: string;
+};
+
+export type Announcement = {
+  id: string;
+  title: string;
+  body: string;
+  studentIds: string[];
+  createdAt: string;
+  expiresOn?: string;
+  deletedAt?: string;
 };

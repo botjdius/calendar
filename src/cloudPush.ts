@@ -5,6 +5,8 @@ export type CloudPushPayload = {
   audience: PushAudience;
   uid?: string;
   studentId?: string;
+  studentIds?: string[];
+  linkedUids?: string[];
   title: string;
   body: string;
   url?: string;
@@ -76,4 +78,16 @@ export async function notifyCloudPush(payload: CloudPushPayload) {
   } catch {
     return false;
   }
+}
+
+export async function sendCloudPush(payload: CloudPushPayload) {
+  if (!pushUrl) throw new Error('푸시 서버가 아직 연결되지 않았습니다.');
+  const res = await fetch(`${pushUrl}/notify`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ gate: pushGate, ...payload }),
+  });
+  if (!res.ok) throw new Error(await readError(res, '공지사항을 보내지 못했습니다.'));
+  const data = (await res.json().catch(() => ({}))) as { sent?: number };
+  return { sent: Number(data.sent || 0) };
 }

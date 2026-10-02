@@ -17,6 +17,7 @@ import {
   instructorMakeupLine,
   isDecidedMakeup,
   isUnackedDecision,
+  makeupWithdrawBlockReason,
   reviseMakeupBlockReason,
   slotsHiddenFromStudents,
 } from '../server/makeup.mjs';
@@ -184,6 +185,33 @@ function testWithdrawAcceptedMakeup() {
   const visible = slotsHiddenFromStudents(slots, [next]);
   assert(visible.some((s) => s.id === slot.id), 'students see the slot again after withdraw');
   console.log('ok withdraw accepted makeup');
+}
+
+function testAcceptedMakeupWithdrawLocksThreeDaysBeforeReplacement() {
+  const accepted = { ...applyInstructorDecide(req, true), date: '2026-09-21' };
+  assert(
+    makeupWithdrawBlockReason(accepted, '2026-09-18') ===
+      '보강으로 대체하는 날 3일 전부터는 철회할 수 없습니다.',
+    'replacement day minus 3 days locks withdraw'
+  );
+  assert(makeupWithdrawBlockReason(accepted, '2026-09-17') === '', 'four days before still allows withdraw');
+  assert(
+    makeupWithdrawBlockReason({ ...accepted, status: 'pending', intent: 'apply' }, '2026-09-18') === '',
+    'pending apply is not locked by replacement day'
+  );
+  let locked = false;
+  try {
+    applyStudentWithdraw(accepted, '2026-09-18');
+  } catch (err) {
+    locked = String(err.message || err).includes('3일 전');
+  }
+  assert(locked, 'accepted makeup cannot be withdrawn 3 days before replacement day');
+  const requested = applyStudentWithdraw(accepted, '2026-09-17');
+  assert(requested.status === 'pending' && requested.intent === 'withdraw', 'withdraw request is created before lock');
+  const pendingApply = { ...req, status: 'pending', intent: 'apply', date: '2026-09-21' };
+  const cancelled = applyStudentWithdraw(pendingApply, '2026-09-18');
+  assert(cancelled.status === 'withdrawn', 'pending apply can still be cancelled inside the lock window');
+  console.log('ok accepted makeup withdraw locks 3 days before replacement');
 }
 
 function testCannotAcceptTakenSlot() {
@@ -426,6 +454,7 @@ testHistoryCollectsDecidedOnly();
 testReviseAcceptedToDeclinedRestoresSlot();
 testReviseDeclinedToAccepted();
 testWithdrawAcceptedMakeup();
+testAcceptedMakeupWithdrawLocksThreeDaysBeforeReplacement();
 testCannotAcceptTakenSlot();
 testWithdrawThenReapplyShowsPending();
 testAcceptHidesSlotAndWithdrawRestoresIt();

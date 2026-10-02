@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mergePushSubscriptions } from './pushStore.mjs';
 import { mergeBanks, packBanks } from './bank.mjs';
+import { dedupeHolidaySessions } from './lib.mjs';
 import {
   droppedAttachmentIds,
   externalizeStudents,
@@ -43,6 +44,26 @@ export function mergeById(current, incoming, incomingNewer) {
     if (!item?.id) continue;
     const prev = map.get(item.id);
     if (!prev || incomingNewer) map.set(item.id, item);
+  }
+  return [...map.values()];
+}
+
+export function mergeAnnouncements(current, incoming, incomingNewer = false) {
+  const map = new Map();
+  for (const item of [...(current || []), ...(incoming || [])]) {
+    if (!item?.id) continue;
+    const prev = map.get(item.id);
+    if (!prev) {
+      map.set(item.id, item);
+      continue;
+    }
+    if (prev.deletedAt || item.deletedAt) {
+      const deleted =
+        String(item.deletedAt || '') >= String(prev.deletedAt || '') ? item : prev;
+      map.set(item.id, { ...(incomingNewer ? item : prev), ...deleted, deletedAt: deleted.deletedAt });
+      continue;
+    }
+    if (incomingNewer) map.set(item.id, item);
   }
   return [...map.values()];
 }
@@ -204,14 +225,43 @@ function mergeText(preferred, fallback) {
   return String(preferred || '') || String(fallback || '');
 }
 
+export function mergeRemovedSessionIds(current, incoming) {
+  return [
+    ...new Set(
+      [...(current || []), ...(incoming || [])]
+        .map((id) => String(id || '').trim())
+        .filter(Boolean)
+    ),
+  ].sort();
+}
+
+function dropRemovedSessions(student) {
+  const removedSessionIds = mergeRemovedSessionIds([], student.removedSessionIds);
+  const removed = new Set(removedSessionIds);
+  return {
+    ...student,
+    sessions: dedupeHolidaySessions(
+      (student.sessions || []).filter(
+        (session) => session?.id && !removed.has(session.id)
+      )
+    ),
+    removedSessionIds,
+  };
+}
+
 function mergeStudent(prev, incoming, incomingNewer) {
   const preferIncoming = incomingNewer;
+  const removedSessionIds = mergeRemovedSessionIds(
+    prev.removedSessionIds,
+    incoming.removedSessionIds
+  );
+  const removedSessions = new Set(removedSessionIds);
   const sessions = new Map();
   for (const session of prev.sessions || []) {
-    if (session?.id) sessions.set(session.id, session);
+    if (session?.id && !removedSessions.has(session.id)) sessions.set(session.id, session);
   }
   for (const session of incoming.sessions || []) {
-    if (!session?.id) continue;
+    if (!session?.id || removedSessions.has(session.id)) continue;
     const older = sessions.get(session.id);
     if (!older) {
       sessions.set(session.id, session);
@@ -248,19 +298,23 @@ function mergeStudent(prev, incoming, incomingNewer) {
     ...preferred,
     linkedUid: preferred.linkedUid || other.linkedUid,
     joinCode: preferred.joinCode || other.joinCode,
-    sessions: [...sessions.values()],
+    sessions: dedupeHolidaySessions([...sessions.values()]),
+    removedSessionIds,
   };
 }
 
 export function mergeStudents(current, incoming, incomingNewer) {
   const map = new Map();
   for (const student of current || []) {
-    if (student?.id) map.set(student.id, student);
+    if (student?.id) map.set(student.id, dropRemovedSessions(student));
   }
   for (const student of incoming || []) {
     if (!student?.id) continue;
     const prev = map.get(student.id);
-    map.set(student.id, prev ? mergeStudent(prev, student, incomingNewer) : student);
+    map.set(
+      student.id,
+      prev ? mergeStudent(prev, student, incomingNewer) : dropRemovedSessions(student)
+    );
   }
   return [...map.values()];
 }
@@ -339,6 +393,17 @@ export function liveStudents(students, removed) {
   return (students || []).filter((student) => !isStudentRemoved(removed, student));
 }
 
+export function announcementsForStudent(announcements, studentId, onDate) {
+  if (!studentId) return [];
+  return (announcements || []).filter((item) => {
+    if (item.deletedAt) return false;
+    if (!(item.studentIds || []).includes(studentId)) return false;
+    if (!onDate) return true;
+    const expiresOn = String(item.expiresOn || item.createdAt || '').slice(0, 10);
+    return !expiresOn || expiresOn >= onDate;
+  });
+}
+
 export function dropStudentsMissingFrom(current, incoming) {
   const liveIds = new Set((incoming || []).map((student) => student.id).filter(Boolean));
   if (!liveIds.size) return current || [];
@@ -392,6 +457,7 @@ export function mergeStudio(current, incoming) {
         (incoming.requests || []).filter((item) => liveIds.has(item.studentId)),
         incoming.removedRequests
       ),
+      announcements: mergeAnnouncements([], incoming.announcements || [], true),
       removedFeedback: mergeRemovedFeedback([], incoming.removedFeedback),
       removedRequests: mergeRemovedRequests([], incoming.removedRequests),
       removedOpenSlots: mergeRemovedOpenSlots([], incoming.removedOpenSlots),
@@ -427,6 +493,7 @@ export function mergeStudio(current, incoming) {
       mergeRequests(current.requests, incoming.requests).filter((item) => liveIds.has(item.studentId)),
       mergeRemovedRequests(current.removedRequests, incoming.removedRequests)
     ),
+    announcements: mergeAnnouncements(current.announcements, incoming.announcements || [], incomingNewer),
     removedFeedback: mergeRemovedFeedback(current.removedFeedback, incoming.removedFeedback),
     removedRequests: mergeRemovedRequests(current.removedRequests, incoming.removedRequests),
     removedOpenSlots,
@@ -449,6 +516,7 @@ export function studioFromState(state) {
     closures: state.closures || [],
     openSlots: dropRemovedOpenSlots(state.openSlots, state.removedOpenSlots),
     requests: dropRemovedRequests(state.requests, state.removedRequests),
+    announcements: state.announcements || [],
     removedFeedback: mergeRemovedFeedback([], state.removedFeedback),
     removedRequests: mergeRemovedRequests([], state.removedRequests),
     removedOpenSlots: mergeRemovedOpenSlots([], state.removedOpenSlots),
@@ -489,6 +557,7 @@ function parseStudio(data) {
         Array.isArray(data.requests) ? data.requests : [],
         Array.isArray(data.removedRequests) ? data.removedRequests : []
       ),
+      announcements: Array.isArray(data.announcements) ? data.announcements : [],
       removedFeedback: Array.isArray(data.removedFeedback)
         ? data.removedFeedback.map((id) => String(id || '').trim()).filter(Boolean)
         : [],

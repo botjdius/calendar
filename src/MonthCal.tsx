@@ -87,7 +87,7 @@ export function MonthCal({
                       width: 5,
                       height: 5,
                       borderRadius: 3,
-                      backgroundColor: k === 'closure' ? colors.wine : k === 'slot' ? colors.moss : k === 'makeup' ? colors.clay : colors.pine,
+                      backgroundColor: k === 'closure' ? colors.wine : k === 'slot' ? colors.moss : k === 'makeup' ? colors.blue : colors.pine,
                     }}
                   />
                 ))}

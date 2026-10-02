@@ -9,6 +9,7 @@ import {
   closureLabel,
   formatTime12,
   formatWeekly,
+  isClosureActive,
   isHolidaySession,
   isPublicClosure,
   makeupRequestLocked,
@@ -26,8 +27,19 @@ import { colors } from '../../src/theme';
 import type { LessonSession } from '../../src/types';
 import { Button, Card, Fold, Pill, Screen } from '../../src/ui';
 
+function announcementDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('ko-KR', {
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 export default function StudentHome() {
-  const { user, myStudent, studentRevoked, closures, openSlots, requests, requestMakeup, changeMakeup, withdrawMakeup } = useStore();
+  const { user, myStudent, studentRevoked, closures, openSlots, requests, announcements, requestMakeup, changeMakeup, withdrawMakeup } = useStore();
   const [pickingSessionId, setPickingSessionId] = useState('');
   const [saving, setSaving] = useState('');
   const [requestError, setRequestError] = useState('');
@@ -57,12 +69,13 @@ export default function StudentHome() {
 
   const student = myStudent;
   const st = sessionStats(student);
-  const publicClosures = closures.filter(isPublicClosure);
+  const publicClosures = closures.filter((closure) => isPublicClosure(closure) && isClosureActive(closure));
   const badge = paymentBadge(student);
   const { upcoming, past } = splitSessionsAroundToday(student.sessions, todayIso());
   const lessonFiles = student.sessions.flatMap((session) =>
     (session.attachments || []).map((file) => ({ file, session }))
   );
+  const notices = [...announcements].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   async function openLessonFile(file: { id: string; name: string; uri: string; mime?: string }) {
     try {
@@ -87,7 +100,7 @@ export default function StudentHome() {
         </Text>
         {isHolidaySession(session) ? (
           <Text style={{ color: colors.wine, marginTop: 8, fontWeight: '800' }}>
-            휴강으로 다음주로 이동 · 다음 주에 {session.cycle}회가 다시 시작합니다.
+            다음 주에 {session.cycle}회가 다시 시작합니다.
           </Text>
         ) : (
           <>
@@ -205,6 +218,30 @@ export default function StudentHome() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
         <Screen title={student.name} subtitle="내 회차만 보입니다. 휴강은 강사 달력에서 자동으로 밀립니다.">
+          {notices.length > 0 ? (
+            <Card>
+              <Text style={{ color: colors.clay, fontSize: 18, fontWeight: '900', marginBottom: 4 }}>
+                공지사항
+              </Text>
+              {notices.map((item, index) => (
+                <View
+                  key={item.id}
+                  style={{
+                    paddingVertical: 12,
+                    borderBottomWidth: index === notices.length - 1 ? 0 : 1,
+                    borderBottomColor: colors.line,
+                  }}
+                >
+                  <Text style={{ color: colors.ink, fontSize: 16, fontWeight: '900' }}>{item.title}</Text>
+                  <Text style={{ color: colors.ink, lineHeight: 22, marginTop: 6 }}>{item.body}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12, marginTop: 8 }}>
+                    {announcementDate(item.createdAt)}
+                    {item.expiresOn ? ` · ${item.expiresOn}까지 표시` : ''}
+                  </Text>
+                </View>
+              ))}
+            </Card>
+          ) : null}
           {publicClosures.length > 0 ? (
             <Card>
               <Text style={{ fontWeight: '800', color: colors.wine, marginBottom: 6 }}>전체 휴강</Text>

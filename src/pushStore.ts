@@ -1,4 +1,4 @@
-export type PushAudience = 'instructors' | 'uid' | 'student';
+export type PushAudience = 'instructors' | 'uid' | 'student' | 'students';
 
 export type PushSubscriptionRecord = {
   uid: string;
@@ -61,17 +61,49 @@ export function upsertPushSubscription(
   return mergePushSubscriptions(list, [next]);
 }
 
+function studentIdSet(input: { studentId?: string; studentIds?: string[] }) {
+  const ids = new Set<string>();
+  if (input.studentId) ids.add(String(input.studentId));
+  for (const id of input.studentIds || []) {
+    if (id) ids.add(String(id));
+  }
+  return ids;
+}
+
+function uidSet(input: { uid?: string; linkedUid?: string; linkedUids?: string[] }) {
+  const ids = new Set<string>();
+  if (input.uid) ids.add(String(input.uid));
+  if (input.linkedUid) ids.add(String(input.linkedUid));
+  for (const id of input.linkedUids || []) {
+    if (id) ids.add(String(id));
+  }
+  return ids;
+}
+
 export function matchPushSubscriptions(
   list: PushSubscriptionRecord[] | undefined,
-  input: { audience: PushAudience; uid?: string; studentId?: string; linkedUid?: string }
+  input: {
+    audience: PushAudience;
+    uid?: string;
+    studentId?: string;
+    studentIds?: string[];
+    linkedUid?: string;
+    linkedUids?: string[];
+  }
 ): PushSubscriptionRecord[] {
   const rows = list || [];
   if (input.audience === 'instructors') return rows.filter((item) => item.role === 'instructor');
   if (input.audience === 'uid') return rows.filter((item) => item.uid && item.uid === input.uid);
+  const ids = studentIdSet(input);
+  const uids = uidSet(input);
+  if (input.audience === 'students') {
+    return rows.filter(
+      (item) => (item.studentId && ids.has(item.studentId)) || (item.uid && uids.has(item.uid))
+    );
+  }
   return rows.filter(
     (item) =>
-      (input.studentId && item.studentId === input.studentId) ||
-      (input.linkedUid && item.uid === input.linkedUid) ||
-      (input.uid && item.uid === input.uid)
+      (item.studentId && ids.has(item.studentId)) ||
+      (item.uid && uids.has(item.uid))
   );
 }

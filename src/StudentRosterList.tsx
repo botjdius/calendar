@@ -1,4 +1,4 @@
-import { useCallback, type ComponentType, type ReactNode } from 'react';
+import { useCallback, useRef, type ComponentType, type ReactNode } from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
 import { formatTime12, formatWeekly, WEEKDAYS } from './schedule';
 import { captureRosterContextMenu, rosterDeletePrompt } from './studentRoster';
@@ -9,6 +9,11 @@ import { ConfirmBox } from './ui';
 const WebDiv = 'div' as unknown as ComponentType<{
   onContextMenu?: (event: { preventDefault?: () => void; stopPropagation?: () => void }) => void;
   onClick?: () => void;
+  onPointerDown?: (event: { button?: number; clientX?: number; clientY?: number }) => void;
+  onPointerMove?: (event: { clientX?: number; clientY?: number }) => void;
+  onPointerUp?: () => void;
+  onPointerCancel?: () => void;
+  onPointerLeave?: () => void;
   style?: Record<string, string | number>;
   children?: ReactNode;
 }>;
@@ -36,6 +41,33 @@ function groupStudents(students: Student[]) {
   return byDay;
 }
 
+function StudentName({ student, color }: { student: Student; color: string }) {
+  const linked = Boolean(student.linkedUid);
+  return (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+      <Text style={{ fontWeight: '800', color, fontSize: 18 }}>{student.name}</Text>
+      <View
+        style={{
+          paddingHorizontal: 8,
+          paddingVertical: 3,
+          borderRadius: 999,
+          backgroundColor: linked ? colors.pineSoft : colors.line,
+        }}
+      >
+        <Text
+          style={{
+            color: linked ? colors.pine : colors.muted,
+            fontSize: 12,
+            fontWeight: '800',
+          }}
+        >
+          {linked ? '앱 등록' : '미등록'}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function RosterRow({
   student,
   selected,
@@ -50,12 +82,45 @@ function RosterRow({
   onDelete: () => void;
 }) {
   const meta = formatWeekly(student.weekday, student.time) || formatTime12(student.time) || '시간 미정';
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pressStart = useRef({ x: 0, y: 0 });
+  const suppressClick = useRef(false);
+  const cancelLongPress = useCallback(() => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    longPressTimer.current = null;
+  }, []);
+  const startLongPress = useCallback(
+    (event: { button?: number; clientX?: number; clientY?: number }) => {
+      if (event.button !== undefined && event.button !== 0) return;
+      cancelLongPress();
+      suppressClick.current = false;
+      pressStart.current = { x: event.clientX || 0, y: event.clientY || 0 };
+      longPressTimer.current = setTimeout(() => {
+        suppressClick.current = true;
+        longPressTimer.current = null;
+        onDelete();
+      }, 500);
+    },
+    [cancelLongPress, onDelete]
+  );
+  const moveLongPress = useCallback(
+    (event: { clientX?: number; clientY?: number }) => {
+      if (
+        Math.abs((event.clientX || 0) - pressStart.current.x) > 10 ||
+        Math.abs((event.clientY || 0) - pressStart.current.y) > 10
+      ) {
+        cancelLongPress();
+      }
+    },
+    [cancelLongPress]
+  );
   const handleContext = useCallback(
     (event: { preventDefault?: () => void; stopPropagation?: () => void }) => {
       captureRosterContextMenu(event);
+      cancelLongPress();
       onDelete();
     },
-    [onDelete]
+    [cancelLongPress, onDelete]
   );
   const nameColor = selected ? colors.wine : colors.pine;
 
@@ -63,7 +128,18 @@ function RosterRow({
     return (
       <WebDiv
         onContextMenu={handleContext}
-        onClick={onOpen}
+        onPointerDown={startLongPress}
+        onPointerMove={moveLongPress}
+        onPointerUp={cancelLongPress}
+        onPointerCancel={cancelLongPress}
+        onPointerLeave={cancelLongPress}
+        onClick={() => {
+          if (suppressClick.current) {
+            suppressClick.current = false;
+            return;
+          }
+          onOpen();
+        }}
         style={{
           paddingTop: 14,
           paddingBottom: 14,
@@ -74,9 +150,10 @@ function RosterRow({
           cursor: 'pointer',
           userSelect: 'none',
           WebkitUserSelect: 'none',
+          touchAction: 'pan-y',
         }}
       >
-        <Text style={{ fontWeight: '800', color: nameColor, fontSize: 18 }}>{student.name}</Text>
+        <StudentName student={student} color={nameColor} />
         <Text style={{ color: colors.muted, fontWeight: '700', marginTop: 4 }}>{meta}</Text>
       </WebDiv>
     );
@@ -95,7 +172,7 @@ function RosterRow({
         backgroundColor: selected ? colors.wineSoft : 'transparent',
       }}
     >
-      <Text style={{ fontWeight: '800', color: nameColor, fontSize: 18 }}>{student.name}</Text>
+      <StudentName student={student} color={nameColor} />
       <Text style={{ color: colors.muted, fontWeight: '700', marginTop: 4 }}>{meta}</Text>
     </Pressable>
   );

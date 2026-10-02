@@ -1,5 +1,5 @@
 import type { Closure, MakeupRequest, OpenSlot, Student } from './types';
-import { applyMakeupReplacement, formatTime12, normalizeStudent, normalizeTime, parseIso } from './schedule';
+import { applyMakeupReplacement, formatTime12, makeupRequestLocked, normalizeStudent, normalizeTime, parseIso, todayIso } from './schedule';
 
 export type MakeupIntent = 'apply' | 'withdraw' | 'change';
 export type MakeupReviseAction = 'accept' | 'decline' | 'withdraw';
@@ -59,7 +59,18 @@ export function restorePrevious(req: MakeupRequest, at = nowIso()): MakeupReques
   });
 }
 
-export function applyStudentWithdraw(req: MakeupRequest): MakeupRequest {
+export function makeupWithdrawBlockReason(
+  req: Pick<MakeupRequest, 'status' | 'date'> | undefined,
+  today = todayIso()
+) {
+  if (!req || req.status !== 'accepted') return '';
+  if (!makeupRequestLocked(req.date, today)) return '';
+  return '보강으로 대체하는 날 3일 전부터는 철회할 수 없습니다.';
+}
+
+export function applyStudentWithdraw(req: MakeupRequest, today = todayIso()): MakeupRequest {
+  const blocked = makeupWithdrawBlockReason(req, today);
+  if (blocked) throw new Error(blocked);
   const at = nowIso();
   const intent = makeupIntent(req);
   if (req.status === 'pending' && intent === 'apply') {

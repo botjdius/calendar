@@ -1,4 +1,4 @@
-import { applyMakeupReplacement, formatTime12, normalizeTime, parseIso } from './lib.mjs';
+import { applyMakeupReplacement, formatTime12, makeupRequestLocked, normalizeTime, parseIso, todayIso } from './lib.mjs';
 
 export function makeupIntent(req) {
   return req?.intent || 'apply';
@@ -47,7 +47,15 @@ export function restorePrevious(req, at = nowIso()) {
   });
 }
 
-export function applyStudentWithdraw(req) {
+export function makeupWithdrawBlockReason(req, today = todayIso()) {
+  if (!req || req.status !== 'accepted') return '';
+  if (!makeupRequestLocked(req.date, today)) return '';
+  return '보강으로 대체하는 날 3일 전부터는 철회할 수 없습니다.';
+}
+
+export function applyStudentWithdraw(req, today = todayIso()) {
+  const blocked = makeupWithdrawBlockReason(req, today);
+  if (blocked) throw new Error(blocked);
   const at = nowIso();
   const intent = makeupIntent(req);
   if (req.status === 'pending' && intent === 'apply') {

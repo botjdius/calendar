@@ -14,7 +14,7 @@ import {
 } from './webPush.mjs';
 import { mergeBanks, packBanks } from './bank.mjs';
 import { mergePushSubscriptions } from './pushStore.mjs';
-import { dropStudentsMissingFrom, fetchCloud, findStudentByJoinCode, joinCodeBlocked, liveStudents, mergeById, mergeFeedback, mergeOpenSlots, mergeRemovedFeedback, dropRemovedFeedback, mergeRemovedOpenSlots, dropRemovedOpenSlots, mergeRemovedRequests, dropRemovedRequests, mergeRemovedStudents, mergeRequests, mergeStudents, pushCloud, sanitizeFeedback, studentSessionRevoked } from './cloud.mjs';
+import { announcementsForStudent, dropStudentsMissingFrom, fetchCloud, findStudentByJoinCode, joinCodeBlocked, liveStudents, mergeAnnouncements, mergeById, mergeFeedback, mergeOpenSlots, mergeRemovedFeedback, dropRemovedFeedback, mergeRemovedOpenSlots, dropRemovedOpenSlots, mergeRemovedRequests, dropRemovedRequests, mergeRemovedStudents, mergeRequests, mergeStudents, pushCloud, sanitizeFeedback, studentSessionRevoked } from './cloud.mjs';
 import { applyRemoveStudent } from './studentRoster.mjs';
 import {
   applyDecideToRequests,
@@ -38,8 +38,12 @@ import {
   isPublicClosure,
   makeupRequestBlockReason,
   nid as makeId,
+  openSlotWhenLabel,
+  closureWhenLabel,
   paymentBadge,
   retargetFollowing,
+  studentsAffectedByClosure,
+  studentsEligibleForOpenSlot,
   upsertPayment,
   wrapCycle,
 } from './lib.mjs';
@@ -57,6 +61,7 @@ const empty = () => ({
   closures: [],
   openSlots: [],
   requests: [],
+  announcements: [],
   feedback: [],
   removedFeedback: [],
   removedRequests: [],
@@ -161,6 +166,40 @@ function notifyStudent(studentId, payload) {
   void dispatchPush((item) => item.uid === uid, payload);
 }
 
+function notifyOpenSlotStudents(slot) {
+  const eligible = studentsEligibleForOpenSlot(state.students, slot.date);
+  if (!eligible.length) return;
+  const ids = new Set(eligible.map((student) => student.id));
+  const uids = new Set(eligible.map((student) => student.linkedUid || studentUid(student.id)).filter(Boolean));
+  const when = openSlotWhenLabel(slot);
+  void dispatchPush(
+    (item) => (item.studentId && ids.has(item.studentId)) || (item.uid && uids.has(item.uid)),
+    {
+      title: '새 보강 시간',
+      body: when ? `${when}에 보강 신청할 수 있습니다.` : '보강 신청할 수 있는 빈 시간이 등록됐습니다.',
+      url: '/board',
+      tag: `open-slot-${slot.id}`,
+    }
+  );
+}
+
+function notifyClosureStudents(closure, roster) {
+  const eligible = studentsAffectedByClosure(roster, closure);
+  if (!eligible.length) return;
+  const ids = new Set(eligible.map((student) => student.id));
+  const uids = new Set(eligible.map((student) => student.linkedUid || studentUid(student.id)).filter(Boolean));
+  const when = closureWhenLabel(closure);
+  void dispatchPush(
+    (item) => (item.studentId && ids.has(item.studentId)) || (item.uid && uids.has(item.uid)),
+    {
+      title: '휴강 안내',
+      body: when ? `${when} 레슨·보강이 휴강입니다.` : '등록된 휴강이 있습니다.',
+      url: '/',
+      tag: `closure-${closure.id}`,
+    }
+  );
+}
+
 function makeupPushBody(req) {
   const when = [req.date, req.time].filter(Boolean).join(' ');
   return `${req.studentName || '레슨생'}${when ? ` · ${when}` : ''}`;
@@ -203,6 +242,7 @@ async function pullCloudIntoHub() {
     mergeRequests(state.requests, cloud.requests),
     mergeRemovedRequests(state.removedRequests, cloud.removedRequests)
   );
+  const announcements = mergeAnnouncements(state.announcements, cloud.announcements || [], incomingNewer);
   const removedFeedback = mergeRemovedFeedback(state.removedFeedback, cloud.removedFeedback);
   const removedRequests = mergeRemovedRequests(state.removedRequests, cloud.removedRequests);
   const feedback = dropRemovedFeedback(mergeFeedback(state.feedback, cloud.feedback), removedFeedback);
@@ -213,6 +253,7 @@ async function pullCloudIntoHub() {
     closures: state.closures,
     openSlots: state.openSlots,
     requests: state.requests || [],
+    announcements: state.announcements || [],
     feedback: state.feedback || [],
     accounts: state.accounts,
     removedStudents: state.removedStudents || [],
@@ -226,6 +267,7 @@ async function pullCloudIntoHub() {
     closures,
     openSlots,
     requests,
+    announcements,
     feedback,
     accounts,
     removedStudents,
@@ -244,6 +286,7 @@ async function pullCloudIntoHub() {
   state.closures = closures;
   state.openSlots = openSlots;
   state.requests = requests;
+  state.announcements = announcements;
   state.feedback = feedback;
   state.accounts = accounts;
   state.removedStudents = removedStudents;
@@ -298,6 +341,7 @@ function emptyStudentView() {
     closures: [],
     openSlots: [],
     requests: [],
+    announcements: [],
     feedback: [],
     bank: { bankName: '', accountNumber: '', accountHolder: '' },
     banks: [],
@@ -321,6 +365,7 @@ function viewFor(uid) {
       closures: state.closures,
       openSlots: dropRemovedOpenSlots(state.openSlots, state.removedOpenSlots),
       requests: dropRemovedRequests(state.requests, state.removedRequests),
+      announcements: state.announcements || [],
       feedback: dropRemovedFeedback(state.feedback, state.removedFeedback),
       removedFeedback: state.removedFeedback || [],
       removedRequests: state.removedRequests || [],
@@ -338,6 +383,7 @@ function viewFor(uid) {
       closures: [],
       openSlots: [],
       requests: [],
+      announcements: [],
       feedback: [],
       bank: { bankName: '', accountNumber: '', accountHolder: '' },
       banks: [],
@@ -359,6 +405,7 @@ function viewFor(uid) {
       (slot) => !claimed.has(slot.id)
     ),
     requests: (state.requests || []).filter((r) => myIds.has(r.studentId)),
+    announcements: announcementsForStudent(state.announcements, acc.studentId || mine[0]?.id),
     feedback: [],
     bank: state.bank,
     banks: state.banks || [],
@@ -618,6 +665,9 @@ const server = createServer(async (req, res) => {
       if (incoming.closures !== undefined) state.closures = incoming.closures;
       if (incoming.openSlots !== undefined) state.openSlots = incoming.openSlots;
       if (incoming.requests !== undefined) state.requests = mergeRequests(state.requests, incoming.requests);
+      if (incoming.announcements !== undefined) {
+        state.announcements = mergeAnnouncements(state.announcements, incoming.announcements, true);
+      }
       if (incoming.feedback !== undefined) state.feedback = mergeFeedback(state.feedback, incoming.feedback);
       if (incoming.removedFeedback !== undefined) {
         state.removedFeedback = mergeRemovedFeedback(state.removedFeedback, incoming.removedFeedback);
@@ -816,9 +866,11 @@ const server = createServer(async (req, res) => {
           reason: String(body.reason || '').trim(),
           scope: 'all',
         };
+        const roster = state.students;
         state.closures = [item, ...state.closures];
         state.students = applyAllHolidays(state.students, state.closures);
         bump();
+        notifyClosureStudents(item, roster);
         send(res, 200, { uid: body.uid, view: viewFor(body.uid) });
         return;
       }
@@ -831,17 +883,16 @@ const server = createServer(async (req, res) => {
           send(res, 400, { error: '날짜와 시작 시간을 넣으세요.' });
           return;
         }
-        state.openSlots = [
-          {
-            id: nid(),
-            date: String(body.date),
-            startTime: String(body.startTime || '').trim(),
-            endTime: String(body.endTime || '').trim(),
-            note: String(body.note || '').trim(),
-          },
-          ...(state.openSlots || []),
-        ];
+        const slot = {
+          id: nid(),
+          date: String(body.date),
+          startTime: String(body.startTime || '').trim(),
+          endTime: String(body.endTime || '').trim(),
+          note: String(body.note || '').trim(),
+        };
+        state.openSlots = [slot, ...(state.openSlots || [])];
         bump();
+        notifyOpenSlotStudents(slot);
         send(res, 200, { uid: body.uid, view: viewFor(body.uid) });
         return;
       }

@@ -13,7 +13,7 @@ export function StudentFeedbackBox({ onSend }: { onSend: (body: string) => Promi
   return (
     <View>
       <Text style={{ color: colors.muted, lineHeight: 22, marginBottom: 12 }}>
-        이름·가입코드·계정 없이 완벽한 익명으로 강사에게만 전달됩니다. 레슨에서 불편한 점, 전하고 싶은 말, 컴플레인 등을 자유롭게 적어 주세요.
+        이름·가입코드·계정 없이 완벽한 익명으로 강사에게만 전달됩니다. 레슨 중 불편했던 점, 전하고 싶은 말, 커리큘럼 제안 등을 자유롭게 적어 주세요.
       </Text>
       <Field
         label="강사에게 전할 말"
@@ -23,7 +23,7 @@ export function StudentFeedbackBox({ onSend }: { onSend: (body: string) => Promi
           setSent(false);
           setError('');
         }}
-        placeholder="불편한 점이나 전하고 싶은 말을 적어 주세요"
+        placeholder="레슨 중 불편했던 점, 전하고 싶은 말, 커리큘럼 제안 등"
         multiline
         minHeight={120}
         autoCapitalize="sentences"

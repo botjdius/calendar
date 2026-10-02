@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { DateField, MonthCal, TimeField, timeLabel, type CalMark } from './MonthCal';
 import { instructorMakeupEntries } from './makeup';
-import { closureCovers, closureEnd, eachDay, formatTime12, isPublicClosure, sessionsForMakeupSlot, slotsForStudentMakeup, WEEKDAYS } from './schedule';
+import { addDays, closureCovers, closureEnd, eachDay, formatTime12, isClosureActive, isPublicClosure, sessionsForMakeupSlot, slotsForStudentMakeup, todayIso, WEEKDAYS } from './schedule';
 import { colors } from './theme';
 import type { Closure, MakeupRequest, OpenSlot, Student } from './types';
 import { isActiveMakeup, studentRequestLabel } from './makeup';
@@ -93,15 +93,21 @@ export function PublicCalendar({
   }, [closures, visibleSlots, makeupDays]);
 
   const publicClosures = closures.filter(isPublicClosure);
+  const closureNotices = publicClosures.filter((closure) => isClosureActive(closure));
   const dayClosures = publicClosures.filter((c) => closureCovers(c, selected));
   const daySlots = visibleSlots.filter((s) => s.date === selected);
   const dayMakeups = makeupDays.filter((row) => row.date === selected);
-  const byWeekday = WEEKDAYS.map((label, idx) => ({
-    label,
-    closures: publicClosures.filter((c) => eachDay(c.date, closureEnd(c)).some((iso) => new Date(iso + 'T12:00:00').getDay() === idx)),
-    slots: visibleSlots.filter((s) => new Date(s.date + 'T12:00:00').getDay() === idx),
-    makeups: makeupDays.filter((row) => new Date(row.date + 'T12:00:00').getDay() === idx),
-  }));
+  const weekDays = Array.from({ length: 7 }, (_, offset) => {
+    const date = addDays(todayIso(), offset);
+    const parsed = new Date(`${date}T12:00:00`);
+    return {
+      date,
+      label: `${parsed.getMonth() + 1}월 ${parsed.getDate()}일 ${WEEKDAYS[parsed.getDay()]}요일`,
+      closures: publicClosures.filter((c) => closureCovers(c, date)),
+      slots: visibleSlots.filter((s) => s.date === date),
+      makeups: makeupDays.filter((row) => row.date === date),
+    };
+  });
 
   function pickDay(iso: string) {
     setSelected(iso);
@@ -241,20 +247,16 @@ export function PublicCalendar({
         </Card>
       ) : null}
 
-      {publicClosures.length > 0 ? (
+      {closureNotices.length > 0 ? (
         <Card>
           <Text style={{ fontWeight: '800', color: colors.wine, marginBottom: 6 }}>전체 휴강</Text>
-          {publicClosures.map((c) => (
+          {closureNotices.map((c) => (
             <Text key={c.id} style={{ color: colors.wine, fontWeight: '700', marginTop: 6 }}>
               휴강 {rangeLabel(c)} {c.reason}
             </Text>
           ))}
         </Card>
-      ) : (
-        <Card>
-          <Text style={{ color: colors.muted }}>등록된 전체 휴강이 없습니다.</Text>
-        </Card>
-      )}
+      ) : null}
 
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
         <View style={{ flex: 1 }}>
@@ -270,9 +272,9 @@ export function PublicCalendar({
           <MonthCal marks={marks} selected={selected} onSelect={instructor ? pickDay : setSelected} editable={instructor} />
         </Card>
       ) : (
-        byWeekday.map((row) => (
-          <Card key={row.label}>
-            <Fold title={`${row.label}요일`}>
+        weekDays.map((row) => (
+          <Card key={row.date}>
+            <Text style={{ color: colors.ink, fontWeight: '800', fontSize: 16 }}>{row.label}</Text>
             {row.closures.length === 0 && row.slots.length === 0 && row.makeups.length === 0 ? (
               <Text style={{ color: colors.muted, marginTop: 6 }}>없음</Text>
             ) : (
@@ -288,7 +290,7 @@ export function PublicCalendar({
                     onPress={() => onOpenStudent?.(rowMakeup.studentId)}
                     disabled={!onOpenStudent}
                   >
-                    <Text style={{ color: colors.clay, fontWeight: '700', marginTop: 8 }}>
+                    <Text style={{ color: colors.blue, fontWeight: '700', marginTop: 8 }}>
                       {rowMakeup.label}
                     </Text>
                   </Pressable>
@@ -303,7 +305,6 @@ export function PublicCalendar({
                 ))}
               </>
             )}
-            </Fold>
           </Card>
         ))
       )}
@@ -331,7 +332,7 @@ export function PublicCalendar({
               disabled={!onOpenStudent}
               style={{ marginTop: 8 }}
             >
-              <Text style={{ color: colors.clay, fontWeight: '700' }}>{row.label}</Text>
+              <Text style={{ color: colors.blue, fontWeight: '700' }}>{row.label}</Text>
             </Pressable>
           ))}
           {daySlots.map((s) => (

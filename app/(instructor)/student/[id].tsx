@@ -59,6 +59,8 @@ export default function StudentDetail() {
   const [sessionTimes, setSessionTimes] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [askRemoveSessionId, setAskRemoveSessionId] = useState('');
+  const [removingSessionId, setRemovingSessionId] = useState('');
+  const [sessionRemoveError, setSessionRemoveError] = useState<Record<string, string>>({});
   const [editLessonId, setEditLessonId] = useState('');
   const [editMakeupId, setEditMakeupId] = useState('');
   const [addCycle, setAddCycle] = useState<CycleIndex>(1);
@@ -194,7 +196,7 @@ export default function StudentDetail() {
         </View>
         {holiday ? (
           <Text style={{ color: colors.wine, marginTop: 8, fontWeight: '800' }}>
-            휴강으로 다음주로 이동 · 다음 주에 {session.cycle}회가 다시 시작합니다.
+            다음 주에 {session.cycle}회가 다시 시작합니다.
           </Text>
         ) : (
           <>
@@ -335,22 +337,51 @@ export default function StudentDetail() {
         {askRemoveSessionId === session.id ? (
           <ConfirmBox
             title="회차 삭제"
-            message={`${session.cycle}회를 지울까요? 메모·보강도 함께 사라집니다.`}
-            confirmLabel="삭제"
-            onCancel={() => setAskRemoveSessionId('')}
-            onConfirm={async () => {
-              await removeSession(student.id, session.id);
+            message={
+              sessionRemoveError[session.id] ||
+              (removingSessionId === session.id
+                ? '회차를 삭제하고 있습니다…'
+                : `${session.cycle}회를 지울까요? 메모·보강도 함께 사라집니다.`)
+            }
+            confirmLabel={removingSessionId === session.id ? '삭제 중' : '삭제'}
+            onCancel={() => {
+              if (removingSessionId) return;
               setAskRemoveSessionId('');
+              setSessionRemoveError((prev) => ({ ...prev, [session.id]: '' }));
+            }}
+            onConfirm={async () => {
+              if (removingSessionId) return;
+              setRemovingSessionId(session.id);
+              setSessionRemoveError((prev) => ({ ...prev, [session.id]: '' }));
+              try {
+                await removeSession(student.id, session.id);
+                setAskRemoveSessionId('');
+              } catch (error) {
+                setSessionRemoveError((prev) => ({
+                  ...prev,
+                  [session.id]:
+                    error instanceof Error ? error.message : '회차를 삭제하지 못했습니다. 다시 시도해 주세요.',
+                }));
+              } finally {
+                setRemovingSessionId('');
+              }
             }}
           />
         ) : (
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginTop: 12, gap: 14 }}>
-            <Pressable onPress={() => addSession(student.id, session.id)}>
-              <Text style={{ color: colors.clay, fontWeight: '800' }}>회차 추가</Text>
-            </Pressable>
-            <Pressable onPress={() => setAskRemoveSessionId(session.id)}>
-              <Text style={{ color: colors.wine, fontWeight: '800' }}>삭제</Text>
-            </Pressable>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <Button tone="ghost" label="회차 추가" onPress={() => addSession(student.id, session.id)} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button
+                tone="wine"
+                label="회차 삭제"
+                onPress={() => {
+                  setSessionRemoveError((prev) => ({ ...prev, [session.id]: '' }));
+                  setAskRemoveSessionId(session.id);
+                }}
+              />
+            </View>
           </View>
         )}
       </Card>

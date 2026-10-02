@@ -24,7 +24,7 @@ export function Screen({
 }) {
   return (
     <View style={styles.screen}>
-      <Text style={styles.kicker}>쟝쟝 · Jyang JyanG</Text>
+      <Text style={styles.kicker}>쟝쟝 · Jyang Jyang</Text>
       <Text style={styles.title}>{title}</Text>
       {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
       {children}
@@ -45,18 +45,20 @@ export function Card({
 export function Fold({
   title,
   defaultOpen = false,
+  plainTitle = false,
   children,
   action,
 }: {
   title: string;
   defaultOpen?: boolean;
+  plainTitle?: boolean;
   children?: ReactNode;
   action?: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const header = (
     <>
-      <Text style={styles.foldTitle}>{open ? `${title} 접기` : `${title} 펼치기`}</Text>
+      <Text style={styles.foldTitle}>{plainTitle ? title : open ? `${title} 접기` : `${title} 펼치기`}</Text>
       <View style={styles.foldChevron}>
         <Text style={[styles.foldChevronMark, { marginTop: open ? 4 : -2 }]}>{open ? '⌃' : '⌄'}</Text>
       </View>
@@ -281,7 +283,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     backgroundColor: colors.bg,
     paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingTop: 28,
     paddingBottom: 16,
     overflow: 'visible',
   },

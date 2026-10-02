@@ -7,6 +7,7 @@ import {
   insertSessionAfter,
   realignAfter,
   hideFromLessonCheck,
+  isClosureActive,
   isPublicClosure,
   isPublicHolidayDate,
   lessonCheckHolidayDays,
@@ -18,12 +19,16 @@ import {
   removeSessionById,
   retargetFollowing,
   sessionCoveredByClosure,
+  studentsAffectedByClosure,
+  closureWhenLabel,
   formatTime12,
   makeupRequestBlockReason,
   makeupRequestLocked,
   normalizeTime,
   slotInMakeupWindow,
   slotsForSessionMakeup,
+  studentsEligibleForOpenSlot,
+  openSlotWhenLabel,
   splitSessionsAroundToday,
   upsertPayment,
   applyAttendance,
@@ -59,6 +64,9 @@ assert.deepEqual(shifted.map((s) => s.date), ['2026-09-16', '2026-09-09', '2026-
 assert.deepEqual(shifted.map((s) => s.cycle), [1, 2, 3]);
 
 const closure = { id: 'h', date: '2026-09-15', endDate: '2026-09-19', time: '', reason: '', scope: 'all' };
+assert.equal(isClosureActive(closure, '2026-09-19'), true);
+assert.equal(isClosureActive(closure, '2026-09-20'), false);
+assert.equal(isClosureActive({ ...closure, endDate: undefined }, '2026-09-16'), false);
 const students = applyHoliday(
   [{
     id: 'st',
@@ -82,6 +90,36 @@ assert.deepEqual(firstHoliday.filter((s) => s.status !== 'cancelled').map((s) =>
 assert.deepEqual(firstHoliday.filter((s) => s.status !== 'cancelled').map((s) => s.date), ['2026-09-23', '2026-09-30', '2026-10-07']);
 assert.equal(isPublicClosure({ scope: undefined }), true);
 assert.equal(sessionCoveredByClosure({ date: '2026-09-16', time: '14:00', status: 'pending' }, closure), true);
+
+const closureHit = {
+  id: 'hit',
+  date: '2026-09-21',
+  endDate: '2026-09-21',
+  time: '14:00',
+  reason: '공휴일',
+  scope: 'all',
+};
+const closureHits = studentsAffectedByClosure(
+  [
+    { id: 'lesson', time: '14:00', sessions: [sess('a', '2026-09-21')] },
+    {
+      id: 'makeup',
+      time: '10:00',
+      sessions: [{ ...sess('b', '2026-09-16'), makeup: { date: '2026-09-21', time: '14:00', status: 'planned' } }],
+    },
+    { id: 'wrong-time', time: '19:00', sessions: [{ ...sess('c', '2026-09-21'), time: '19:00' }] },
+    { id: 'other-day', time: '14:00', sessions: [sess('d', '2026-09-28')] },
+    {
+      id: 'moved',
+      time: '14:00',
+      sessions: [{ ...sess('e', '2026-09-21'), makeup: { date: '2026-09-28', time: '14:00', status: 'planned' } }],
+    },
+    { id: 'attended', time: '14:00', sessions: [sess('f', '2026-09-21', 'attended')] },
+  ],
+  closureHit
+);
+assert.deepEqual(closureHits.map((s) => s.id), ['lesson', 'makeup']);
+assert.equal(closureWhenLabel(closureHit), '9/21(월) 오후 2시 · 공휴일');
 
 const midHoliday = applyHoliday(
   [{
@@ -165,6 +203,7 @@ const weekOnly = sortSessions(
 assert.equal(weekOnly.filter((s) => s.status === 'cancelled').length, 1);
 assert.equal(weekOnly.find((s) => s.status === 'cancelled').date, '2026-09-17');
 assert.equal(weekOnly.find((s) => s.status === 'cancelled').cycle, 2);
+assert.equal(weekOnly.find((s) => s.status === 'cancelled').id, 'holiday:2026-09-17:14:00');
 assert.deepEqual(weekOnly.filter((s) => s.status !== 'cancelled').map((s) => s.cycle), [1, 2, 3, 4]);
 assert.deepEqual(weekOnly.filter((s) => s.status !== 'cancelled').map((s) => s.date), ['2026-09-10', '2026-09-24', '2026-10-01', '2026-10-08']);
 
@@ -525,6 +564,19 @@ assert.equal(
   ).map((s) => s.id).join(','),
   'in'
 );
+
+const openSlotEligible = studentsEligibleForOpenSlot(
+  [
+    { id: 'in', sessions: [sess('a', '2026-09-28')] },
+    { id: 'locked', sessions: [sess('b', '2026-09-20')] },
+    { id: 'attended', sessions: [{ ...sess('c', '2026-09-28'), status: 'attended' }] },
+    { id: 'far', sessions: [sess('d', '2026-10-10')] },
+  ],
+  '2026-09-21',
+  '2026-09-18'
+);
+assert.deepEqual(openSlotEligible.map((s) => s.id), ['in']);
+assert.equal(openSlotWhenLabel({ date: '2026-09-21', startTime: '19:00', endTime: '20:00' }), '9/21(월) 오후 7시–오후 8시');
 
 const split = splitSessionsAroundToday(
   [

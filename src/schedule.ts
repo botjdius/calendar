@@ -516,6 +516,25 @@ function lessonDaysInClosures(closures: Closure[] | undefined, weekday: number, 
   return [...new Set(days)].sort();
 }
 
+export function holidayHoldId(date: string, time: string) {
+  return `holiday:${date}:${time || 'all'}`;
+}
+
+export function dedupeHolidaySessions(sessions: LessonSession[]) {
+  const chosen = new Map<string, LessonSession>();
+  for (const session of sessions || []) {
+    if (session.status !== 'cancelled' || !session.date) continue;
+    const previous = chosen.get(session.date);
+    if (!previous || session.id.startsWith('holiday:')) chosen.set(session.date, session);
+  }
+  return (sessions || []).filter(
+    (session) =>
+      session.status !== 'cancelled' ||
+      !session.date ||
+      chosen.get(session.date) === session
+  );
+}
+
 export function applyClosuresToSessions(
   sessions: LessonSession[],
   time: string,
@@ -544,7 +563,7 @@ export function applyClosuresToSessions(
   const addHold = (cycle: number, pack: number, date: string, sessionTime: string) => {
     if (!date || extras.some((hold) => hold.date === date)) return;
     extras.push({
-      id: nid(),
+      id: holidayHoldId(date, sessionTime || time),
       cycle: wrapCycle(cycle),
       pack,
       status: 'cancelled',
@@ -605,14 +624,14 @@ export function applyClosuresToSessions(
     else if (prev) addHold(wrapCycle(prev.cycle + 1), prev.pack ?? 0, day, prev.time || time);
   }
 
-  return [
+  return dedupeHolidaySessions([
     ...reals.map((session) => {
       const date = placed.get(session.id);
       if (!date) return { ...session, originalDate: undefined };
       return { ...session, date, originalDate: undefined };
     }),
     ...extras,
-  ];
+  ]);
 }
 
 export function postponeOverlaps(
@@ -679,6 +698,26 @@ export function eligibleMakeupSessions(sessions: LessonSession[], today = todayI
 
 export function sessionsForMakeupSlot(sessions: LessonSession[], slotDate: string, today = todayIso()) {
   return eligibleMakeupSessions(sessions, today).filter((s) => slotInMakeupWindow(slotDate, s.date));
+}
+
+export function studentsEligibleForOpenSlot(
+  students: Pick<Student, 'id' | 'sessions' | 'linkedUid'>[],
+  slotDate: string,
+  today = todayIso()
+) {
+  return (students || []).filter(
+    (student) => sessionsForMakeupSlot(student.sessions || [], slotDate, today).length > 0
+  );
+}
+
+export function openSlotWhenLabel(slot: { date?: string; startTime?: string; endTime?: string }) {
+  if (!slot?.date) return '';
+  const d = parseIso(slot.date);
+  const day = `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]})`;
+  const start = formatTime12(slot.startTime);
+  const end = slot.endTime ? `–${formatTime12(slot.endTime)}` : '';
+  const time = `${start}${end}`;
+  return [day, time].filter(Boolean).join(' ');
 }
 
 export function slotsForStudentMakeup(
@@ -858,6 +897,13 @@ export function isPublicClosure(c: Pick<Closure, 'scope'>) {
   return !c.scope || c.scope === 'all';
 }
 
+export function isClosureActive(
+  c: Pick<Closure, 'date' | 'endDate'>,
+  onDate = todayIso()
+) {
+  return Boolean(c.date) && closureEnd(c) >= onDate;
+}
+
 export function isPublicHolidayDate(iso: string, closures?: Closure[]) {
   if (!iso) return false;
   return (closures || []).some((c) => isPublicClosure(c) && closureCovers(c, iso));
@@ -918,6 +964,51 @@ export function sessionCoveredByClosure(
   if (!isPublicClosure(closure)) return false;
   if (!timeMatches(session.time || fallbackTime, closure.time || '')) return false;
   return Boolean(session.date && closureCovers(closure, session.date));
+}
+
+export function sessionHitsClosure(
+  session: Pick<LessonSession, 'date' | 'time' | 'status' | 'makeup'>,
+  closure: Closure,
+  fallbackTime = ''
+) {
+  if (!isPublicClosure(closure)) return false;
+  const makeup = session.makeup;
+  if (makeup?.date && makeup.status !== 'done' && makeup.status !== 'absent') {
+    if (
+      closureCovers(closure, makeup.date) &&
+      timeMatches(makeup.time || session.time || fallbackTime, closure.time || '')
+    ) {
+      return true;
+    }
+    if (makeup.date !== session.date) return false;
+  }
+  if (session.status === 'cancelled' || session.status === 'attended' || session.status === 'absent') return false;
+  return Boolean(
+    session.date &&
+      closureCovers(closure, session.date) &&
+      timeMatches(session.time || fallbackTime, closure.time || '')
+  );
+}
+
+export function studentsAffectedByClosure(
+  students: Pick<Student, 'id' | 'time' | 'sessions' | 'linkedUid'>[],
+  closure: Closure
+) {
+  return (students || []).filter((student) =>
+    (student.sessions || []).some((session) => sessionHitsClosure(session, closure, student.time))
+  );
+}
+
+export function closureWhenLabel(c: Pick<Closure, 'date' | 'endDate' | 'time' | 'reason'>) {
+  if (!c?.date) return '';
+  const start = parseIso(c.date);
+  const startDay = `${start.getMonth() + 1}/${start.getDate()}(${WEEKDAYS[start.getDay()]})`;
+  const endIso = closureEnd(c);
+  const end = endIso && endIso !== c.date ? parseIso(endIso) : null;
+  const range = end ? `–${end.getMonth() + 1}/${end.getDate()}(${WEEKDAYS[end.getDay()]})` : '';
+  const when = c.time?.trim() ? formatTime12(c.time) : '종일';
+  const reason = String(c.reason || '').trim();
+  return [`${startDay}${range}`, when, reason ? `· ${reason}` : ''].filter(Boolean).join(' ');
 }
 
 export function applyAllHolidays(students: Student[], closures: Closure[]): Student[] {
@@ -1003,8 +1094,14 @@ export function normalizeStudent(raw: Student | (Student & { makeupCredits?: num
   const weekly = parseWeekly(raw.weeklyTime || `${WEEKDAYS[raw.weekday] ?? '수'} ${raw.time || '14:00'}`);
   const weekday = Number.isInteger(raw.weekday) && raw.weekday >= 0 ? raw.weekday : weekly.weekday;
   const time = raw.time || weekly.time;
-  const sessions = (raw.sessions || []).map((s, i) =>
-    normalizeSession(s as unknown as Record<string, unknown>, time, Math.floor(i / 4))
+  const removedSessionIds = [
+    ...new Set((raw.removedSessionIds || []).map((id) => String(id || '').trim()).filter(Boolean)),
+  ];
+  const removed = new Set(removedSessionIds);
+  const sessions = dedupeHolidaySessions(
+    (raw.sessions || [])
+      .filter((session) => session?.id && !removed.has(session.id))
+      .map((s, i) => normalizeSession(s as unknown as Record<string, unknown>, time, Math.floor(i / 4)))
   );
   const payments = normalizePayments(raw, sessions);
   const badge = paymentBadge({ sessions, payments });
@@ -1020,5 +1117,6 @@ export function normalizeStudent(raw: Student | (Student & { makeupCredits?: num
     weeklyTime: formatWeekly(weekday, time),
     startCycle: wrapCycle(raw.startCycle || sessions[0]?.cycle || 1),
     sessions,
+    removedSessionIds,
   };
 }

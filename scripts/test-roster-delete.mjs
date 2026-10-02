@@ -4,7 +4,7 @@ import {
   requestsForLiveStudents,
   rosterDeletePrompt,
 } from '../server/studentRoster.mjs';
-import { isStudentRemoved, mergeRequests } from '../server/cloud.mjs';
+import { isStudentRemoved, mergeRequests, resolveStudentJoin } from '../server/cloud.mjs';
 
 function assert(cond, message) {
   if (!cond) throw new Error(message);
@@ -114,8 +114,35 @@ function testMergedRequestsDoNotBringDeletedStudentBack() {
   console.log('ok deleted-student requests cannot return after roster delete');
 }
 
+function testSameNameCreatesAndJoinsNewCard() {
+  const removed = [
+    {
+      id: 'old-card',
+      name: '같은이름',
+      joinCode: 'OLD001',
+      linkedUid: 'old-user',
+      removedAt: '2026-09-30T12:00:00.000Z',
+    },
+  ];
+  const fresh = {
+    id: 'new-card',
+    name: '같은이름',
+    joinCode: 'NEW001',
+    linkedUid: null,
+    weekday: 3,
+    time: '19:00',
+    sessions: [],
+  };
+  const joined = resolveStudentJoin([], [fresh], removed, removed, 'NEW001', true);
+  assert(joined.roster.some((student) => student.id === 'new-card'), 'same name must not hide a newly created card');
+  assert(joined.card?.id === 'new-card', 'new join code must connect to the new card');
+  assert(!isStudentRemoved(removed, fresh), 'deletion must be matched by identity, not by name');
+  console.log('ok same-name student creates and joins a new card');
+}
+
 testRightClickOpensDeleteWindow();
 testSettingsRosterDeleteFlow();
 testRemoveKeepsOtherStudentsAndHidesDeleted();
 testMergedRequestsDoNotBringDeletedStudentBack();
+testSameNameCreatesAndJoinsNewCard();
 console.log('ok roster delete');

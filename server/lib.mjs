@@ -112,6 +112,10 @@ export function isPublicClosure(c) {
   return !c?.scope || c.scope === 'all';
 }
 
+export function isClosureActive(c, onDate = todayIso()) {
+  return Boolean(c?.date) && closureEnd(c) >= onDate;
+}
+
 export function isPublicHolidayDate(iso, closures) {
   if (!iso) return false;
   return (closures || []).some((c) => isPublicClosure(c) && closureCovers(c, iso));
@@ -422,6 +426,27 @@ function lessonDaysInClosures(closures, weekday, time) {
   return [...new Set(days)].sort();
 }
 
+export function holidayHoldId(date, time) {
+  return `holiday:${date}:${time || 'all'}`;
+}
+
+export function dedupeHolidaySessions(sessions) {
+  const chosen = new Map();
+  for (const session of sessions || []) {
+    if (session.status !== 'cancelled' || !session.date) continue;
+    const previous = chosen.get(session.date);
+    if (!previous || String(session.id || '').startsWith('holiday:')) {
+      chosen.set(session.date, session);
+    }
+  }
+  return (sessions || []).filter(
+    (session) =>
+      session.status !== 'cancelled' ||
+      !session.date ||
+      chosen.get(session.date) === session
+  );
+}
+
 export function applyClosuresToSessions(sessions, time, closures, weekday) {
   const reals = sessions.filter((session) => session.status !== 'cancelled');
   const ordered = sortSessions(reals);
@@ -444,7 +469,7 @@ export function applyClosuresToSessions(sessions, time, closures, weekday) {
   const addHold = (cycle, pack, date, sessionTime) => {
     if (!date || extras.some((hold) => hold.date === date)) return;
     extras.push({
-      id: nid(),
+      id: holidayHoldId(date, sessionTime || time),
       cycle: wrapCycle(cycle),
       pack,
       status: 'cancelled',
@@ -505,14 +530,14 @@ export function applyClosuresToSessions(sessions, time, closures, weekday) {
     else if (prev) addHold(wrapCycle(prev.cycle + 1), prev.pack ?? 0, day, prev.time || time);
   }
 
-  return [
+  return dedupeHolidaySessions([
     ...reals.map((session) => {
       const date = placed.get(session.id);
       if (!date) return { ...session, originalDate: undefined };
       return { ...session, date, originalDate: undefined };
     }),
     ...extras,
-  ];
+  ]);
 }
 
 export function postponeOverlaps(sessions, time, closures, weekday) {
@@ -570,6 +595,22 @@ export function eligibleMakeupSessions(sessions, today = todayIso()) {
 
 export function sessionsForMakeupSlot(sessions, slotDate, today = todayIso()) {
   return eligibleMakeupSessions(sessions, today).filter((s) => slotInMakeupWindow(slotDate, s.date));
+}
+
+export function studentsEligibleForOpenSlot(students, slotDate, today = todayIso()) {
+  return (students || []).filter(
+    (student) => sessionsForMakeupSlot(student.sessions || [], slotDate, today).length > 0
+  );
+}
+
+export function openSlotWhenLabel(slot) {
+  if (!slot?.date) return '';
+  const d = parseIso(slot.date);
+  const day = `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]})`;
+  const start = formatTime12(slot.startTime);
+  const end = slot.endTime ? `–${formatTime12(slot.endTime)}` : '';
+  const time = `${start}${end}`;
+  return [day, time].filter(Boolean).join(' ');
 }
 
 export function slotsForStudentMakeup(openSlots, sessions, today = todayIso()) {
@@ -677,6 +718,44 @@ export function sessionCoveredByClosure(session, closure, fallbackTime = '') {
   if (!isPublicClosure(closure)) return false;
   if (!timeMatches(session.time || fallbackTime, closure.time || '')) return false;
   return Boolean(session.date && closureCovers(closure, session.date));
+}
+
+export function sessionHitsClosure(session, closure, fallbackTime = '') {
+  if (!isPublicClosure(closure)) return false;
+  const makeup = session.makeup;
+  if (makeup?.date && makeup.status !== 'done' && makeup.status !== 'absent') {
+    if (
+      closureCovers(closure, makeup.date) &&
+      timeMatches(makeup.time || session.time || fallbackTime, closure.time || '')
+    ) {
+      return true;
+    }
+    if (makeup.date !== session.date) return false;
+  }
+  if (session.status === 'cancelled' || session.status === 'attended' || session.status === 'absent') return false;
+  return Boolean(
+    session.date &&
+      closureCovers(closure, session.date) &&
+      timeMatches(session.time || fallbackTime, closure.time || '')
+  );
+}
+
+export function studentsAffectedByClosure(students, closure) {
+  return (students || []).filter((student) =>
+    (student.sessions || []).some((session) => sessionHitsClosure(session, closure, student.time))
+  );
+}
+
+export function closureWhenLabel(c) {
+  if (!c?.date) return '';
+  const start = parseIso(c.date);
+  const startDay = `${start.getMonth() + 1}/${start.getDate()}(${WEEKDAYS[start.getDay()]})`;
+  const endIso = closureEnd(c);
+  const end = endIso && endIso !== c.date ? parseIso(endIso) : null;
+  const range = end ? `–${end.getMonth() + 1}/${end.getDate()}(${WEEKDAYS[end.getDay()]})` : '';
+  const when = c.time?.trim() ? formatTime12(c.time) : '종일';
+  const reason = String(c.reason || '').trim();
+  return [`${startDay}${range}`, when, reason ? `· ${reason}` : ''].filter(Boolean).join(' ');
 }
 
 export function isHolidaySession(session) {

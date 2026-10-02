@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Text, View } from 'react-native';
 import { timeLabel } from './MonthCal';
-import { makeupIntent, studentRequestLabel } from './makeup';
+import { makeupIntent, makeupWithdrawBlockReason, studentRequestLabel } from './makeup';
 import { formatTime12, slotsForSessionMakeup } from './schedule';
 import { colors } from './theme';
 import type { MakeupRequest, OpenSlot, Student } from './types';
@@ -30,6 +30,7 @@ export function StudentMakeupActions({
   const immediate = request.status === 'pending' && intent === 'apply';
   const waitingChange = request.status === 'pending' && (intent === 'withdraw' || intent === 'change');
   const accepted = request.status === 'accepted';
+  const withdrawLocked = Boolean(makeupWithdrawBlockReason(request));
 
   async function run(kind: string, fn: () => Promise<void>) {
     if (busy || saving) return;
@@ -99,12 +100,18 @@ export function StudentMakeupActions({
           ) : null}
           {accepted ? (
             <>
-              <Button
-                tone="ghost"
-                disabled={Boolean(busy)}
-                label={busy === 'withdraw' ? '처리 중' : '철회 요청'}
-                onPress={() => run('withdraw', () => onWithdraw(request.id))}
-              />
+              {withdrawLocked ? (
+                <Text style={{ color: colors.muted, fontWeight: '700', marginBottom: 6 }}>
+                  보강으로 대체하는 날 3일 전부터는 철회할 수 없습니다.
+                </Text>
+              ) : (
+                <Button
+                  tone="ghost"
+                  disabled={Boolean(busy)}
+                  label={busy === 'withdraw' ? '처리 중' : '철회 요청'}
+                  onPress={() => run('withdraw', () => onWithdraw(request.id))}
+                />
+              )}
               <Button tone="clay" disabled={Boolean(busy)} label="변경 요청" onPress={() => setPicking(true)} />
             </>
           ) : null}

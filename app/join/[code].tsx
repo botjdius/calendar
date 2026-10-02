@@ -1,5 +1,5 @@
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, Text } from 'react-native';
 import { useStore } from '../../src/store';
 import { colors } from '../../src/theme';
@@ -14,12 +14,13 @@ function paramCode(value: string | string[] | undefined) {
 export default function JoinByLink() {
   const raw = useLocalSearchParams<{ code?: string | string[] }>().code;
   const codeFromLink = paramCode(raw).trim().toUpperCase();
-  const { ready, user, signIn, lastLogin } = useStore();
+  const { ready, user, signIn, signOut, lastLogin } = useStore();
   const router = useRouter();
   const [name, setName] = useState(lastLogin?.role === 'student' ? lastLogin.name : '');
   const [code, setCode] = useState(codeFromLink);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const autoJoiningCode = useRef('');
 
   useEffect(() => {
     if (codeFromLink) setCode(codeFromLink);
@@ -44,12 +45,30 @@ export default function JoinByLink() {
   }
 
   useEffect(() => {
-    if (!ready || user || !codeFromLink) return;
-    void submit(lastLogin?.role === 'student' ? lastLogin.name : '', codeFromLink);
-  }, [ready, user, codeFromLink]);
+    if (!ready || !codeFromLink || autoJoiningCode.current === codeFromLink) return;
+    const savedCode = lastLogin?.role === 'student' ? String(lastLogin.code || '').trim().toUpperCase() : '';
+    if (user?.role === 'student' && savedCode === codeFromLink) return;
+    if (user?.role === 'instructor') return;
+    autoJoiningCode.current = codeFromLink;
+    void (async () => {
+      try {
+        if (user?.role === 'student') await signOut();
+        await submit(lastLogin?.role === 'student' ? lastLogin.name : '', codeFromLink);
+      } finally {
+        autoJoiningCode.current = '';
+      }
+    })();
+  }, [ready, user, codeFromLink, lastLogin?.role, lastLogin?.name, lastLogin?.code]);
 
   if (!ready) return <Loading />;
-  if (user) return <Redirect href="/" />;
+  if (user?.role === 'instructor') return <Redirect href="/" />;
+  if (
+    user?.role === 'student' &&
+    lastLogin?.role === 'student' &&
+    String(lastLogin.code || '').trim().toUpperCase() === codeFromLink
+  ) {
+    return <Redirect href="/" />;
+  }
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>

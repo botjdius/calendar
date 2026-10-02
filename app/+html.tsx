@@ -3,15 +3,26 @@ import { ScrollViewStyleReset } from 'expo-router/html';
 const css = `
   html, body, #root {
     height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
     background: #F3EDE3;
   }
-  body {
-    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px) + var(--safari-gap, 0px));
+  @supports (height: 100dvh) {
+    html, body, #root {
+      height: 100dvh;
+    }
+  }
+  [role="tablist"] {
+    box-sizing: border-box !important;
+    flex-shrink: 0 !important;
   }
   @supports (-webkit-touch-callout: none) {
     [role="tablist"] {
       bottom: var(--safari-gap, 0px) !important;
-      padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important;
+      height: calc(94px + env(safe-area-inset-bottom, 0px)) !important;
+      min-height: calc(94px + env(safe-area-inset-bottom, 0px)) !important;
+      padding-bottom: calc(30px + env(safe-area-inset-bottom, 0px)) !important;
     }
   }
 `;

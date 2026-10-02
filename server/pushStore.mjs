@@ -37,14 +37,32 @@ export function upsertPushSubscription(list, item) {
   return mergePushSubscriptions(list, [next]);
 }
 
+function studentIdSet(input = {}) {
+  const ids = new Set();
+  if (input.studentId) ids.add(String(input.studentId));
+  for (const id of input.studentIds || []) {
+    if (id) ids.add(String(id));
+  }
+  return ids;
+}
+
+function uidSet(input = {}) {
+  const ids = new Set();
+  if (input.uid) ids.add(String(input.uid));
+  if (input.linkedUid) ids.add(String(input.linkedUid));
+  for (const id of input.linkedUids || []) {
+    if (id) ids.add(String(id));
+  }
+  return ids;
+}
+
 export function matchPushSubscriptions(list, input = {}) {
   const rows = list || [];
   if (input.audience === 'instructors') return rows.filter((item) => item.role === 'instructor');
   if (input.audience === 'uid') return rows.filter((item) => item.uid && item.uid === input.uid);
+  const ids = studentIdSet(input);
+  const uids = uidSet(input);
   return rows.filter(
-    (item) =>
-      (input.studentId && item.studentId === input.studentId) ||
-      (input.linkedUid && item.uid === input.linkedUid) ||
-      (input.uid && item.uid === input.uid)
+    (item) => (item.studentId && ids.has(item.studentId)) || (item.uid && uids.has(item.uid))
   );
 }
