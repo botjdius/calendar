@@ -3,6 +3,7 @@ import {
   appendChecklistLineToNote,
   checklistMarkdownLine,
   lessonChecklistProgress,
+  lessonReadingBlocks,
   mergeChecklistChecked,
   parseLessonContent,
   toggleChecklistChecked,
@@ -24,6 +25,10 @@ assert(toggleChecklistChecked(['item-0'], 'item-0', false).length === 0, 'toggle
 assert(checklistMarkdownLine('A') === '- [ ] A', 'markdown line');
 assert(appendChecklistLineToNote('hello', 'B').endsWith('- [ ] B\n'), 'append line');
 assert(appendChecklistBlockTemplate('').includes('연습 항목 1'), 'template');
+const mixed = '# Goal\n- [ ] A\nplain';
+const reading = lessonReadingBlocks(mixed);
+assert(reading.length === 2 && reading.every((b) => b.type !== 'checkbox'), 'reading strips checkboxes');
+assert(lessonReadingBlocks('only text').length === 1, 'plain note stays reading');
 const emptyBox = parseLessonContent('- [ ] ');
 assert(emptyBox.length === 1 && emptyBox[0].type === 'checkbox', 'empty checkbox line parses');
 console.log('ok lesson checklist');

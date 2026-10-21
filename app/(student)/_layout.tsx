@@ -39,6 +39,7 @@ export default function StudentTabs() {
       })}
     >
       <Tabs.Screen name="index" options={{ title: '내 레슨' }} />
+      <Tabs.Screen name="lesson-checklist" options={{ href: null, title: '레슨·숙제' }} />
       <Tabs.Screen name="board" options={{ title: '달력' }} />
       <Tabs.Screen name="settings" options={{ title: '설정' }} />
     </Tabs>

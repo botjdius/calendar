@@ -45,6 +45,14 @@ export function lessonChecklistItems(note: string) {
   return parseLessonContent(note).filter((b): b is LessonContentBlock & { type: 'checkbox' } => b.type === 'checkbox');
 }
 
+/** Lesson text for the reading section; checkbox lines appear only in the homework list. */
+export function lessonReadingBlocks(note: string): LessonContentBlock[] {
+  const blocks = parseLessonContent(note);
+  const hasChecklist = blocks.some((b) => b.type === 'checkbox');
+  if (!hasChecklist) return blocks;
+  return blocks.filter((b) => b.type !== 'checkbox');
+}
+
 export function lessonChecklistProgress(note: string, checkedIds: string[] | undefined) {
   const items = lessonChecklistItems(note);
   const checked = new Set(checkedIds || []);

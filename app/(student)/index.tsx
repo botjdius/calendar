@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,6 +22,7 @@ import {
   todayIso,
 } from '../../src/schedule';
 import { LessonContentView } from '../../src/LessonContentView';
+import { lessonChecklistProgress } from '../../src/lessonChecklist';
 import { sessionStats, useStore } from '../../src/store';
 import { isActiveMakeup } from '../../src/makeup';
 import { StudentMakeupActions } from '../../src/StudentMakeupActions';
@@ -40,6 +42,7 @@ function announcementDate(value: string) {
 }
 
 export default function StudentHome() {
+  const router = useRouter();
   const {
     user,
     myStudent,
@@ -137,6 +140,24 @@ export default function StudentHome() {
               interactive
               onToggleItem={(itemId, checked) => void setChecklistItem(session.id, itemId, checked)}
             />
+            {(() => {
+              const progress = lessonChecklistProgress(session.note, session.checklistChecked);
+              if (!session.note.trim() && progress.total === 0) return null;
+              const progressLabel =
+                progress.total > 0 ? `숙제 ${progress.done}/${progress.total}` : '수업 내용 보기';
+              return (
+                <Button
+                  tone="clay"
+                  label={`레슨 내용 및 숙제 체크리스트 · ${progressLabel}`}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/(student)/lesson-checklist',
+                      params: { sessionId: session.id },
+                    })
+                  }
+                />
+              );
+            })()}
             {(session.attachments || []).map((f) => (
               <Button
                 key={f.id}
