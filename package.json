@@ -44,7 +44,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web --lan",
     "export:web": "expo export --platform web",
-    "deploy:web": "expo export --platform web && cp dist/index.html dist/200.html && surge dist jyangjyang.surge.sh",
+    "deploy:web": "expo export --platform web && cp dist/index.html dist/200.html && npx surge dist jyangjyang.surge.sh",
     "seed:cloud": "node scripts/seed-cloud.mjs",
     "build:android": "eas build --platform android --profile preview",
     "build:ios": "eas build --platform ios --profile preview",
