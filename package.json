@@ -49,6 +49,7 @@
     "build:android": "eas build --platform android --profile preview",
     "build:ios": "eas build --platform ios --profile preview",
     "build:all": "eas build --platform all --profile preview",
+    "deploy:ota": "eas update --channel production --environment production --message \"쟝쟝 production OTA\"",
     "deploy:ota:production": "eas update --channel production --environment production --message \"쟝쟝 production OTA\"",
     "deploy:ota:staging": "eas update --channel preview --environment preview --message \"쟝쟝 staging OTA\""
   },
