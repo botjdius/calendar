@@ -3,7 +3,7 @@ export type LessonContentBlock =
   | { type: 'paragraph'; text: string }
   | { type: 'checkbox'; itemId: string; label: string; teacherChecked: boolean };
 
-const CHECKBOX_LINE = /^-\s*\[([ xX])\]\s*(.+)$/;
+const CHECKBOX_LINE = /^-\s*\[([ xX])\]\s*(.*)$/;
 
 export function parseLessonContent(note: string): LessonContentBlock[] {
   const blocks: LessonContentBlock[] = [];
@@ -69,4 +69,26 @@ export function toggleChecklistChecked(checked: string[] | undefined, itemId: st
   if (on) set.add(itemId);
   else set.delete(itemId);
   return [...set].sort();
+}
+
+export function checklistMarkdownLine(itemText = '') {
+  const body = itemText.trim();
+  return body ? `- [ ] ${body}` : '- [ ] ';
+}
+
+export const LESSON_CHECKLIST_BLOCK_TEMPLATE = `## 이번 회차 체크
+- [ ] 연습 항목 1
+- [ ] 연습 항목 2`;
+
+export function appendChecklistLineToNote(note: string, itemText = '') {
+  const line = checklistMarkdownLine(itemText);
+  const base = note.replace(/\s+$/, '');
+  if (!base) return `${line}\n`;
+  return `${base}\n${line}\n`;
+}
+
+export function appendChecklistBlockTemplate(note: string) {
+  const trimmed = note.trim();
+  if (!trimmed) return `${LESSON_CHECKLIST_BLOCK_TEMPLATE}\n`;
+  return `${trimmed.replace(/\s+$/, '')}\n\n${LESSON_CHECKLIST_BLOCK_TEMPLATE}\n`;
 }

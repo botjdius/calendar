@@ -14,6 +14,7 @@ import { colors } from '../../../src/theme';
 import type { CycleIndex, LessonSession } from '../../../src/types';
 import { studentShareLink, useLanInfo } from '../../../src/share';
 import { LessonContentView } from '../../../src/LessonContentView';
+import { LessonNoteChecklistTools } from '../../../src/LessonNoteChecklistTools';
 import { Button, Card, ConfirmBox, Field, Fold, Loading, Pill, Screen } from '../../../src/ui';
 
 function paramId(value: string | string[] | undefined) {
@@ -265,9 +266,13 @@ export default function StudentDetail() {
               label="수업 내용"
               value={notes[session.id] ?? session.note}
               onChangeText={(t) => setNotes((p) => ({ ...p, [session.id]: t }))}
-              placeholder={'이번 회차 메모\n- [ ] 연습 항목은 마크다운 체크박스로 적어 주세요'}
+              placeholder="이번 회차 메모 (체크 항목은 아래 버튼으로 넣을 수 있습니다)"
               multiline
               autoCapitalize="sentences"
+            />
+            <LessonNoteChecklistTools
+              note={notes[session.id] ?? session.note}
+              onChangeNote={(next) => setNotes((p) => ({ ...p, [session.id]: next }))}
             />
             <Button
               label="수업 내용 저장"

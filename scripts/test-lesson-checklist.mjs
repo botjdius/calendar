@@ -1,4 +1,7 @@
 import {
+  appendChecklistBlockTemplate,
+  appendChecklistLineToNote,
+  checklistMarkdownLine,
   lessonChecklistProgress,
   mergeChecklistChecked,
   parseLessonContent,
@@ -18,4 +21,9 @@ const progress = lessonChecklistProgress(note, ['item-0']);
 assert(progress.done === 1 && progress.total === 2, 'progress counts student checks only');
 assert(mergeChecklistChecked(['item-0'], ['item-1']).join() === 'item-0,item-1', 'merge unions checks');
 assert(toggleChecklistChecked(['item-0'], 'item-0', false).length === 0, 'toggle off');
+assert(checklistMarkdownLine('A') === '- [ ] A', 'markdown line');
+assert(appendChecklistLineToNote('hello', 'B').endsWith('- [ ] B\n'), 'append line');
+assert(appendChecklistBlockTemplate('').includes('연습 항목 1'), 'template');
+const emptyBox = parseLessonContent('- [ ] ');
+assert(emptyBox.length === 1 && emptyBox[0].type === 'checkbox', 'empty checkbox line parses');
 console.log('ok lesson checklist');
