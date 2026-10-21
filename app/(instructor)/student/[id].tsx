@@ -13,6 +13,7 @@ import { sessionStats, useStore } from '../../../src/store';
 import { colors } from '../../../src/theme';
 import type { CycleIndex, LessonSession } from '../../../src/types';
 import { studentShareLink, useLanInfo } from '../../../src/share';
+import { LessonContentView } from '../../../src/LessonContentView';
 import { Button, Card, ConfirmBox, Field, Fold, Loading, Pill, Screen } from '../../../src/ui';
 
 function paramId(value: string | string[] | undefined) {
@@ -259,16 +260,12 @@ export default function StudentDetail() {
               </View>
             </View>
             <Button tone="ghost" label="대기로" onPress={() => setSessionStatus(student.id, session.id, 'pending')} />
-            {session.note ? (
-              <Text style={{ color: colors.ink, marginTop: 8 }}>수업 내용: {session.note}</Text>
-            ) : (
-              <Text style={{ color: colors.muted, marginTop: 8 }}>수업 내용이 아직 없습니다.</Text>
-            )}
+            <LessonContentView note={session.note} checkedIds={session.checklistChecked} />
             <Field
               label="수업 내용"
               value={notes[session.id] ?? session.note}
               onChangeText={(t) => setNotes((p) => ({ ...p, [session.id]: t }))}
-              placeholder="이번 회차 수업 메모"
+              placeholder={'이번 회차 메모\n- [ ] 연습 항목은 마크다운 체크박스로 적어 주세요'}
               multiline
               autoCapitalize="sentences"
             />

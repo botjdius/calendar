@@ -1,3 +1,4 @@
+import { normalizeChecklistChecked } from './lessonChecklist';
 import type { Closure, CycleIndex, LessonSession, MakeupInfo, PackPayment, SessionFile, Student } from './types';
 
 export const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -1059,6 +1060,7 @@ export function normalizeSession(raw: Record<string, unknown>, fallbackTime: str
     makeup: makeupRaw && makeupRaw.date ? makeupRaw : null,
     note: String(raw.note || ''),
     studentNote: String(raw.studentNote || ''),
+    checklistChecked: normalizeChecklistChecked(raw.checklistChecked),
     attachments: Array.isArray(raw.attachments)
       ? (raw.attachments as SessionFile[]).filter((f) => f && f.id && f.uri)
       : [],

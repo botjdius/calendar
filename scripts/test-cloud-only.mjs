@@ -36,6 +36,47 @@ function testMergeStudentsKeepsBothNotes() {
   console.log('ok merge students keeps notes and newer status');
 }
 
+function testMergeStudentsKeepsChecklist() {
+  const current = [
+    {
+      id: 's1',
+      name: 'ㅂ',
+      sessions: [
+        {
+          id: 'x',
+          note: '- [ ] A',
+          studentNote: '',
+          checklistChecked: ['item-0'],
+          status: 'pending',
+          attachments: [],
+        },
+      ],
+    },
+  ];
+  const incoming = [
+    {
+      id: 's1',
+      name: 'ㅂ',
+      sessions: [
+        {
+          id: 'x',
+          note: '- [ ] A\n- [ ] B',
+          studentNote: '',
+          checklistChecked: ['item-1'],
+          status: 'pending',
+          attachments: [],
+          updatedAt: '2026-09-15T10:00:00.000Z',
+        },
+      ],
+    },
+  ];
+  const merged = mergeStudents(current, incoming, false);
+  const session = merged[0].sessions[0];
+  assert(session.note.includes('B'), 'instructor note merge keeps newer text');
+  assert(session.checklistChecked.includes('item-0') && session.checklistChecked.includes('item-1'), 'checklist merges');
+  console.log('ok merge students keeps checklist');
+}
+
 function testAttachmentAddAndDelete() {
   const base = [
     {
@@ -224,6 +265,7 @@ async function rentryRoundtrip() {
 }
 
 testMergeStudentsKeepsBothNotes();
+testMergeStudentsKeepsChecklist();
 testAttachmentAddAndDelete();
 testMergeRequestsKeepsPending();
 await rentryRoundtrip();

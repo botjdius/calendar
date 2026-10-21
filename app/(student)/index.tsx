@@ -20,6 +20,7 @@ import {
   splitSessionsAroundToday,
   todayIso,
 } from '../../src/schedule';
+import { LessonContentView } from '../../src/LessonContentView';
 import { sessionStats, useStore } from '../../src/store';
 import { isActiveMakeup } from '../../src/makeup';
 import { StudentMakeupActions } from '../../src/StudentMakeupActions';
@@ -39,7 +40,19 @@ function announcementDate(value: string) {
 }
 
 export default function StudentHome() {
-  const { user, myStudent, studentRevoked, closures, openSlots, requests, announcements, requestMakeup, changeMakeup, withdrawMakeup } = useStore();
+  const {
+    user,
+    myStudent,
+    studentRevoked,
+    closures,
+    openSlots,
+    requests,
+    announcements,
+    requestMakeup,
+    changeMakeup,
+    withdrawMakeup,
+    setChecklistItem,
+  } = useStore();
   const [pickingSessionId, setPickingSessionId] = useState('');
   const [saving, setSaving] = useState('');
   const [requestError, setRequestError] = useState('');
@@ -118,11 +131,12 @@ export default function StudentHome() {
                 {session.makeup.status === 'done' ? ' · 완료(대체)' : session.makeup.status === 'absent' ? ' · 불참' : ' · 예정'}
               </Text>
             ) : null}
-            {session.note ? (
-              <Text style={{ color: colors.ink, marginTop: 8 }}>수업 내용: {session.note}</Text>
-            ) : (
-              <Text style={{ color: colors.muted, marginTop: 8 }}>수업 내용이 아직 없습니다.</Text>
-            )}
+            <LessonContentView
+              note={session.note}
+              checkedIds={session.checklistChecked}
+              interactive
+              onToggleItem={(itemId, checked) => void setChecklistItem(session.id, itemId, checked)}
+            />
             {(session.attachments || []).map((f) => (
               <Button
                 key={f.id}

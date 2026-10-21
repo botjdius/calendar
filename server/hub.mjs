@@ -847,6 +847,46 @@ const server = createServer(async (req, res) => {
         send(res, 200, { uid: acc.uid, view: viewFor(acc.uid) });
         return;
       }
+      if (action === 'student-checklist') {
+        const acc = account(body.uid);
+        if (!acc || acc.role !== 'student') {
+          send(res, 403, { error: '레슨생만 체크리스트를 수정할 수 있습니다.' });
+          return;
+        }
+        const card = state.students.find((s) => s.linkedUid === acc.uid || s.id === acc.studentId);
+        if (!card) {
+          send(res, 400, { error: '연결된 레슨 카드가 없습니다.' });
+          return;
+        }
+        const itemId = String(body.itemId || '').trim();
+        if (!itemId) {
+          send(res, 400, { error: '체크 항목이 없습니다.' });
+          return;
+        }
+        const checked = Boolean(body.checked);
+        const stamp = new Date().toISOString();
+        state.students = state.students.map((s) => {
+          if (s.id !== card.id) return s;
+          return {
+            ...s,
+            sessions: (s.sessions || []).map((sess) => {
+              if (sess.id !== body.sessionId) return sess;
+              const prev = Array.isArray(sess.checklistChecked) ? sess.checklistChecked : [];
+              const set = new Set(prev);
+              if (checked) set.add(itemId);
+              else set.delete(itemId);
+              return {
+                ...sess,
+                checklistChecked: [...set].sort(),
+                updatedAt: stamp,
+              };
+            }),
+          };
+        });
+        bump();
+        send(res, 200, { uid: acc.uid, view: viewFor(acc.uid) });
+        return;
+      }
       if (action === 'add-closure') {
         if (!isInstructor(body.uid)) {
           send(res, 403, { error: '강사만 휴강을 등록할 수 있습니다.' });

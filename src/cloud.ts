@@ -253,6 +253,13 @@ function mergeText(preferred: string | undefined, fallback: string | undefined) 
   return next || prev;
 }
 
+function mergeChecklistChecked(
+  preferred: string[] | undefined,
+  fallback: string[] | undefined
+) {
+  return [...new Set([...(preferred || []), ...(fallback || [])])].sort();
+}
+
 export function mergeRemovedSessionIds(current?: string[], incoming?: string[]): string[] {
   return [
     ...new Set(
@@ -311,6 +318,7 @@ function mergeStudent(prev: Student, incoming: Student, incomingNewer: boolean):
       ...newer,
       note: mergeText(newer.note, other.note),
       studentNote: mergeText(newer.studentNote, other.studentNote),
+      checklistChecked: mergeChecklistChecked(newer.checklistChecked, other.checklistChecked),
       attachments: mergeSessionAttachments(newer.attachments, other.attachments, removedAttachmentIds),
       makeup: newer.makeup !== undefined ? newer.makeup : other.makeup,
       updatedAt: sessionStamp(newer) || sessionStamp(other) || undefined,

@@ -57,6 +57,7 @@ import {
   unusedJoinCode,
 } from './cloud';
 import { INSTRUCTOR_INVITE_CODE, isFirebaseConfigured } from './config';
+import { toggleChecklistChecked } from './lessonChecklist';
 import { externalizeStudents, isFilePointer, releaseFilePointer } from './fileCloud.mjs';
 import { auth, db } from './firebase';
 import { discoverHub, emptyBank, emptyShared, fetchBlob, hubAuth, isEphemeralHubUrl, mergeBanks, packBanks, probeHub, putBlob, rememberHubUrl, rememberPublicHubUrl, savedHubUrl, type SharedBlob } from './hub';
@@ -120,6 +121,7 @@ import type {
   MakeupInfo,
   MakeupRequest,
   MakeupStatus,
+  LessonSession,
   OpenSlot,
   SessionFile,
   SessionStatus,
@@ -209,6 +211,7 @@ type Store = {
   setMakeupStatus: (studentId: string, sessionId: string, status: MakeupStatus) => Promise<void>;
   setInstructorNote: (studentId: string, sessionId: string, note: string) => Promise<void>;
   setStudentNote: (sessionId: string, note: string) => Promise<void>;
+  setChecklistItem: (sessionId: string, itemId: string, checked: boolean) => Promise<void>;
   addSessionFile: (studentId: string, sessionId: string, file?: SessionFile) => Promise<void>;
   removeSessionFile: (studentId: string, sessionId: string, fileId: string) => Promise<void>;
   addClosure: (input: Omit<Closure, 'id'>) => Promise<void>;
@@ -2015,6 +2018,47 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 sessions: s.sessions.map((sess) => (sess.id === sessionId ? { ...sess, studentNote: note } : sess)),
               }
             : s
+        ),
+      });
+    },
+    async setChecklistItem(sessionId, itemId, checked) {
+      if (!user || user.role !== 'student') throw new Error('레슨생만 체크리스트를 수정할 수 있습니다.');
+      const stamp = new Date().toISOString();
+      const patchSession = (sess: LessonSession) => {
+        if (sess.id !== sessionId) return sess;
+        const checklistChecked = toggleChecklistChecked(sess.checklistChecked, itemId, checked);
+        return { ...sess, checklistChecked, updatedAt: stamp };
+      };
+      if (firebaseOn) {
+        const st = students.find((s) => s.linkedUid === user.uid || s.id === user.studentId);
+        if (!st) return;
+        await updateDoc(doc(db!, 'students', st.id), {
+          sessions: st.sessions.map(patchSession),
+        });
+        return;
+      }
+      if (hubBase.current) {
+        try {
+          await hubAuth(hubBase.current, {
+            action: 'student-checklist',
+            uid: user.uid,
+            sessionId,
+            itemId,
+            checked,
+          });
+          applyShared(await fetchBlob(hubBase.current, user.uid), user.uid);
+          return;
+        } catch {
+          hubBase.current = null;
+          setSyncMode(isCloudConfigured ? 'cloud' : 'device');
+        }
+      }
+      const st = students.find((s) => s.linkedUid === user.uid || s.id === user.studentId);
+      if (!st) return;
+      const shared = await loadDevice();
+      await persistShared({
+        students: shared.students.map((s) =>
+          s.id === st.id ? { ...s, sessions: s.sessions.map(patchSession) } : s
         ),
       });
     },

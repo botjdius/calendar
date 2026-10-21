@@ -30,6 +30,8 @@ export type LessonSession = {
   makeup: MakeupInfo | null;
   note: string;
   studentNote: string;
+  /** Checked markdown checklist item ids (`item-0`, …) for this student's session */
+  checklistChecked?: string[];
   attachments: SessionFile[];
   removedAttachmentIds?: string[];
   updatedAt?: string;

@@ -36,6 +36,7 @@
     "hub": "node server/hub.mjs",
     "phone": "node server/hub.mjs",
     "test:schedule": "node server/schedule.test.mjs",
+    "test:checklist": "node scripts/test-lesson-checklist.mjs",
     "dev": "node server/hub.mjs & expo start --lan",
     "android": "expo start --android",
     "ios": "expo start --ios",
