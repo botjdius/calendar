@@ -14,6 +14,7 @@
     "expo-status-bar": "~57.0.1",
     "expo-symbols": "~57.0.3",
     "expo-system-ui": "~57.0.4",
+    "expo-updates": "~57.0.26",
     "firebase": "^12.19.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -29,6 +30,7 @@
   "devDependencies": {
     "@types/react": "~19.2.2",
     "babel-preset-expo": "^57.0.11",
+    "eas-cli": "^25.3.0",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -46,7 +48,9 @@
     "seed:cloud": "node scripts/seed-cloud.mjs",
     "build:android": "eas build --platform android --profile preview",
     "build:ios": "eas build --platform ios --profile preview",
-    "build:all": "eas build --platform all --profile preview"
+    "build:all": "eas build --platform all --profile preview",
+    "deploy:ota:production": "eas update --channel production --environment production --message \"쟝쟝 production OTA\"",
+    "deploy:ota:staging": "eas update --channel preview --environment preview --message \"쟝쟝 staging OTA\""
   },
   "private": true
 }
