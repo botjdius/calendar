@@ -42,11 +42,18 @@
     },
     "updates": {
       "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 0
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/13b839d2-4756-465a-b523-1c952b8907ef"
     },
     "plugins": [
       "expo-router",
       "expo-document-picker"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "13b839d2-4756-465a-b523-1c952b8907ef"
+      }
+    }
   }
 }
