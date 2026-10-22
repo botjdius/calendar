@@ -847,6 +847,25 @@ const server = createServer(async (req, res) => {
         send(res, 200, { uid: acc.uid, view: viewFor(acc.uid) });
         return;
       }
+      if (action === 'student-monthly-goals') {
+        const acc = account(body.uid);
+        if (!acc || acc.role !== 'student') {
+          send(res, 403, { error: '레슨생만 한달 목표를 수정할 수 있습니다.' });
+          return;
+        }
+        const card = state.students.find((s) => s.linkedUid === acc.uid || s.id === acc.studentId);
+        if (!card) {
+          send(res, 400, { error: '연결된 레슨 카드가 없습니다.' });
+          return;
+        }
+        const monthlyGoals = body.monthlyGoals && typeof body.monthlyGoals === 'object' ? body.monthlyGoals : {};
+        state.students = state.students.map((s) =>
+          s.id === card.id ? { ...s, monthlyGoals } : s
+        );
+        bump();
+        send(res, 200, { uid: acc.uid, view: viewFor(acc.uid) });
+        return;
+      }
       if (action === 'student-checklist') {
         const acc = account(body.uid);
         if (!acc || acc.role !== 'student') {

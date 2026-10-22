@@ -205,7 +205,7 @@ export async function putBlob(
 
 export async function hubAuth(
   base: string,
-  body: Record<string, string | number | boolean | undefined | string[]>
+  body: Record<string, unknown>
 ): Promise<{ uid: string | null; view: SharedBlob }> {
   const res = await timedFetch(`${base}/auth`, {
     method: 'POST',

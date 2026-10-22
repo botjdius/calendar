@@ -1,4 +1,5 @@
 import { normalizeChecklistChecked } from './lessonChecklist';
+import { normalizeMonthlyGoalsStore } from './monthlyGoals';
 import type { Closure, CycleIndex, LessonSession, MakeupInfo, PackPayment, SessionFile, Student } from './types';
 
 export const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -1133,6 +1134,7 @@ export function normalizeStudent(raw: Student | (Student & { makeupCredits?: num
   );
   const payments = normalizePayments(raw, sessions);
   const badge = paymentBadge({ sessions, payments });
+  const monthlyGoals = normalizeMonthlyGoalsStore(raw.monthlyGoals);
   return {
     id: raw.id,
     name: raw.name,
@@ -1146,5 +1148,6 @@ export function normalizeStudent(raw: Student | (Student & { makeupCredits?: num
     startCycle: wrapCycle(raw.startCycle || sessions[0]?.cycle || 1),
     sessions,
     removedSessionIds,
+    ...(Object.keys(monthlyGoals).length ? { monthlyGoals } : {}),
   };
 }

@@ -58,6 +58,7 @@ import {
 } from './cloud';
 import { INSTRUCTOR_INVITE_CODE, isFirebaseConfigured } from './config';
 import { toggleChecklistChecked } from './lessonChecklist';
+import { normalizeMonthlyGoalsStore } from './monthlyGoals';
 import { externalizeStudents, isFilePointer, releaseFilePointer } from './fileCloud.mjs';
 import { auth, db } from './firebase';
 import { discoverHub, emptyBank, emptyShared, fetchBlob, hubAuth, isEphemeralHubUrl, mergeBanks, packBanks, probeHub, putBlob, rememberHubUrl, rememberPublicHubUrl, savedHubUrl, type SharedBlob } from './hub';
@@ -122,6 +123,7 @@ import type {
   MakeupRequest,
   MakeupStatus,
   LessonSession,
+  MonthlyGoalsStore,
   OpenSlot,
   SessionFile,
   SessionStatus,
@@ -212,6 +214,7 @@ type Store = {
   setInstructorNote: (studentId: string, sessionId: string, note: string) => Promise<void>;
   setStudentNote: (sessionId: string, note: string) => Promise<void>;
   setChecklistItem: (sessionId: string, itemId: string, checked: boolean) => Promise<void>;
+  saveMonthlyGoals: (studentId: string, monthlyGoals: MonthlyGoalsStore) => Promise<void>;
   addSessionFile: (studentId: string, sessionId: string, file?: SessionFile) => Promise<void>;
   removeSessionFile: (studentId: string, sessionId: string, fileId: string) => Promise<void>;
   addClosure: (input: Omit<Closure, 'id'>) => Promise<void>;
@@ -2061,6 +2064,39 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         students: shared.students.map((s) =>
           s.id === st.id ? { ...s, sessions: s.sessions.map(patchSession) } : s
         ),
+      });
+    },
+    async saveMonthlyGoals(studentId, monthlyGoals) {
+      const packed = normalizeMonthlyGoalsStore(monthlyGoals);
+      const patch = Object.keys(packed).length ? { monthlyGoals: packed } : { monthlyGoals: {} };
+      if (user?.role === 'instructor') {
+        await api.patchStudent(studentId, patch);
+        return;
+      }
+      if (!user || user.role !== 'student') throw new Error('로그인이 필요합니다.');
+      const st = students.find((s) => s.linkedUid === user.uid || s.id === user.studentId);
+      if (!st || st.id !== studentId) throw new Error('내 레슨 카드만 수정할 수 있습니다.');
+      if (firebaseOn) {
+        await updateDoc(doc(db!, 'students', st.id), patch);
+        return;
+      }
+      if (hubBase.current) {
+        try {
+          await hubAuth(hubBase.current, {
+            action: 'student-monthly-goals',
+            uid: user.uid,
+            monthlyGoals: packed,
+          });
+          applyShared(await fetchBlob(hubBase.current, user.uid), user.uid);
+          return;
+        } catch {
+          hubBase.current = null;
+          setSyncMode(isCloudConfigured ? 'cloud' : 'device');
+        }
+      }
+      const shared = await loadDevice();
+      await persistShared({
+        students: shared.students.map((s) => (s.id === st.id ? { ...s, ...patch } : s)),
       });
     },
     async addSessionFile(studentId, sessionId, readyFile) {

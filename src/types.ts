@@ -44,6 +44,18 @@ export type PackPayment = {
   paidSessionId?: string;
 };
 
+export type MonthlyGoalItem = {
+  id: string;
+  text: string;
+  checked: boolean;
+  /** YYYY-MM when the goal was first added */
+  createdMonth: string;
+  updatedAt?: string;
+};
+
+/** Keys are YYYY-MM (local calendar month). */
+export type MonthlyGoalsStore = Record<string, MonthlyGoalItem[]>;
+
 export type Student = {
   id: string;
   name: string;
@@ -57,6 +69,7 @@ export type Student = {
   startCycle: CycleIndex;
   sessions: LessonSession[];
   removedSessionIds?: string[];
+  monthlyGoals?: MonthlyGoalsStore;
 };
 
 export type RemovedStudent = {

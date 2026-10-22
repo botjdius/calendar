@@ -9,6 +9,7 @@ import {
   mergeSessionAttachments,
   stripDataUriAttachments,
 } from '../src/fileCloud.mjs';
+import { mergeMonthlyGoals } from '../src/monthlyGoals.ts';
 
 const CLOUD_URL = process.env.JYANG_CLOUD_URL || 'https://extendsclass.com/api/json-storage/bin/ebefede';
 const RENTRY_ID = process.env.JYANG_RENTRY_ID || 'jyangjyang-studio';
@@ -312,6 +313,7 @@ function mergeStudent(prev, incoming, incomingNewer) {
     joinCode: preferred.joinCode || other.joinCode,
     sessions: dedupeHolidaySessions([...sessions.values()]),
     removedSessionIds,
+    monthlyGoals: mergeMonthlyGoals(preferred.monthlyGoals, other.monthlyGoals, preferIncoming),
   };
 }
 

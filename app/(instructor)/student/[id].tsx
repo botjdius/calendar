@@ -29,6 +29,7 @@ import { sessionStats, useStore } from '../../../src/store';
 import { colors } from '../../../src/theme';
 import type { CycleIndex, LessonSession } from '../../../src/types';
 import { studentShareLink, useLanInfo } from '../../../src/share';
+import { MonthlyGoalsSection } from '../../../src/MonthlyGoalsSection';
 import { LessonContentView } from '../../../src/LessonContentView';
 import { LessonNoteChecklistTools } from '../../../src/LessonNoteChecklistTools';
 import { Button, Card, ConfirmBox, Field, Fold, Loading, Pill, Screen } from '../../../src/ui';
@@ -421,6 +422,7 @@ export default function StudentDetail() {
       <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
         <Screen title={student.name} subtitle="회차는 1~4로 돌고, 각 회차를 추가·삭제할 수 있습니다.">
           <Button tone="ghost" label="목록으로" onPress={goList} />
+          <MonthlyGoalsSection student={student} />
           <Card>
             <Fold title="가입코드">
             <Text selectable style={{ fontSize: 28, fontWeight: '800', color: colors.clay, letterSpacing: 2 }}>

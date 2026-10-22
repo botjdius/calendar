@@ -7,6 +7,7 @@ import {
 } from './fileCloud.mjs';
 import { emptyShared, isEphemeralHubUrl, mergeBanks, packBanks, type SharedBlob } from './hub';
 import { mergePushSubscriptions } from './pushStore';
+import { mergeMonthlyGoals } from './monthlyGoals';
 import { dedupeHolidaySessions } from './schedule';
 import type { Account, Announcement, AnonymousFeedback, MakeupRequest, RemovedStudent, Student } from './types';
 
@@ -343,6 +344,7 @@ function mergeStudent(prev: Student, incoming: Student, incomingNewer: boolean):
     joinCode: preferred.joinCode || other.joinCode,
     sessions: dedupeHolidaySessions([...sessions.values()]),
     removedSessionIds,
+    monthlyGoals: mergeMonthlyGoals(preferred.monthlyGoals, other.monthlyGoals, preferIncoming),
   };
 }
 

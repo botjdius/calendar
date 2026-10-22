@@ -21,6 +21,7 @@ import {
   splitSessionsAroundToday,
   todayIso,
 } from '../../src/schedule';
+import { MonthlyGoalsSection } from '../../src/MonthlyGoalsSection';
 import { StudentSessionChecklist } from '../../src/StudentSessionChecklist';
 import { sessionStats, useStore } from '../../src/store';
 import { isActiveMakeup } from '../../src/makeup';
@@ -228,6 +229,7 @@ export default function StudentHome() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
         <Screen title={student.name} subtitle="내 회차만 보입니다. 휴강은 강사 달력에서 자동으로 밀립니다.">
+          <MonthlyGoalsSection student={student} />
           {notices.length > 0 ? (
             <Card>
               <Text style={{ color: colors.clay, fontSize: 18, fontWeight: '900', marginBottom: 4 }}>
