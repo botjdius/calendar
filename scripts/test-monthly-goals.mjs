@@ -5,6 +5,7 @@ import {
   monthKeyFromIso,
   nextMonthKey,
   prepareMonthlyGoals,
+  removeMonthlyGoalItem,
   rollMonthForward,
   toggleMonthlyGoalItem,
 } from '../src/monthlyGoals.ts';
@@ -46,5 +47,22 @@ const merged = mergeMonthlyGoals(
 assert(merged['2026-10'][0].checked === true, 'merge prefers newer incoming');
 
 assert(currentMonthKey('2026-10-01').length === 7, 'current month key shape');
+
+const deleteStore = {
+  [sep]: [{ id: 'ghost', text: '삭제될 목표', checked: false, createdMonth: sep }],
+  [oct]: [{ id: 'ghost', text: '삭제될 목표', checked: false, createdMonth: sep }],
+};
+const deleted = removeMonthlyGoalItem(deleteStore, 'ghost');
+assert(deleted.removedMonthlyGoalIds.includes('ghost'), 'delete records tombstone id');
+assert(!deleted.store[sep]?.length && !deleted.store[oct]?.length, 'delete strips id from all months');
+const afterRollover = prepareMonthlyGoals(deleteStore, oct, deleted.removedMonthlyGoalIds);
+assert(!afterRollover.monthItems.some((item) => item.id === 'ghost'), 'rollover must not resurrect deleted goal');
+const mergedDelete = mergeMonthlyGoals(
+  deleted.store,
+  { [oct]: [{ id: 'ghost', text: 'stale', checked: false, createdMonth: oct, updatedAt: 't9' }] },
+  false,
+  deleted.removedMonthlyGoalIds
+);
+assert(!mergedDelete[oct]?.some((item) => item.id === 'ghost'), 'merge must respect deleted goal tombstone');
 
 console.log('ok monthly goals');

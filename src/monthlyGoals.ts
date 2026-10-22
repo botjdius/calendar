@@ -63,6 +63,31 @@ function normalizeItem(raw: unknown, monthKey: string): MonthlyGoalItem | null {
   };
 }
 
+export function mergeRemovedMonthlyGoalIds(current?: string[], incoming?: string[]): string[] {
+  return [
+    ...new Set(
+      [...(current || []), ...(incoming || [])]
+        .map((id) => String(id || '').trim())
+        .filter(Boolean)
+    ),
+  ].sort();
+}
+
+export function stripRemovedMonthlyGoals(
+  store: MonthlyGoalsStore | undefined,
+  removedMonthlyGoalIds?: string[]
+): MonthlyGoalsStore {
+  const removed = new Set(mergeRemovedMonthlyGoalIds([], removedMonthlyGoalIds));
+  if (!removed.size) return normalizeMonthlyGoalsStore(store);
+  const next = normalizeMonthlyGoalsStore(store);
+  for (const month of Object.keys(next)) {
+    const list = (next[month] || []).filter((item) => !removed.has(item.id));
+    if (list.length) next[month] = list;
+    else delete next[month];
+  }
+  return next;
+}
+
 export function normalizeMonthlyGoalsStore(raw: MonthlyGoalsStore | undefined): MonthlyGoalsStore {
   if (!raw || typeof raw !== 'object') return {};
   const out: MonthlyGoalsStore = {};
@@ -86,12 +111,18 @@ function sortedMonthKeys(store: MonthlyGoalsStore) {
   return Object.keys(store).filter((k) => store[k]?.length).sort();
 }
 
-export function rollMonthForward(store: MonthlyGoalsStore, fromMonth: string, toMonth: string): MonthlyGoalsStore {
-  const from = store[fromMonth] || [];
-  if (!from.length) return store;
+export function rollMonthForward(
+  store: MonthlyGoalsStore,
+  fromMonth: string,
+  toMonth: string,
+  removedMonthlyGoalIds?: string[]
+): MonthlyGoalsStore {
+  const base = stripRemovedMonthlyGoals(store, removedMonthlyGoalIds);
+  const from = base[fromMonth] || [];
+  if (!from.length) return base;
   const unchecked = from.filter((item) => !item.checked);
-  if (!unchecked.length) return store;
-  const next = { ...store };
+  if (!unchecked.length) return base;
+  const next = { ...base };
   next[fromMonth] = from.filter((item) => item.checked);
   if (!next[fromMonth].length) delete next[fromMonth];
   const current = [...(next[toMonth] || [])];
@@ -105,14 +136,18 @@ export function rollMonthForward(store: MonthlyGoalsStore, fromMonth: string, to
   return next;
 }
 
-export function applyRolloversToMonth(store: MonthlyGoalsStore, targetMonth: string): MonthlyGoalsStore {
-  let next = normalizeMonthlyGoalsStore(store);
+export function applyRolloversToMonth(
+  store: MonthlyGoalsStore,
+  targetMonth: string,
+  removedMonthlyGoalIds?: string[]
+): MonthlyGoalsStore {
+  let next = stripRemovedMonthlyGoals(store, removedMonthlyGoalIds);
   const keys = sortedMonthKeys(next);
   if (!keys.length) return next;
   let cursor = keys[0];
   while (cursor < targetMonth) {
     const following = nextMonthKey(cursor);
-    next = rollMonthForward(next, cursor, following);
+    next = rollMonthForward(next, cursor, following, removedMonthlyGoalIds);
     cursor = following;
   }
   return next;
@@ -120,10 +155,11 @@ export function applyRolloversToMonth(store: MonthlyGoalsStore, targetMonth: str
 
 export function prepareMonthlyGoals(
   store: MonthlyGoalsStore | undefined,
-  targetMonth: string
+  targetMonth: string,
+  removedMonthlyGoalIds?: string[]
 ): { store: MonthlyGoalsStore; monthItems: MonthlyGoalItem[]; changed: boolean } {
-  const normalized = normalizeMonthlyGoalsStore(store);
-  const rolled = applyRolloversToMonth(normalized, targetMonth);
+  const normalized = stripRemovedMonthlyGoals(store, removedMonthlyGoalIds);
+  const rolled = applyRolloversToMonth(normalized, targetMonth, removedMonthlyGoalIds);
   const changed = JSON.stringify(rolled) !== JSON.stringify(normalized);
   return {
     store: rolled,
@@ -148,16 +184,21 @@ function mergeGoalItem(a: MonthlyGoalItem, b: MonthlyGoalItem, preferB: boolean)
 export function mergeMonthlyGoals(
   a: MonthlyGoalsStore | undefined,
   b: MonthlyGoalsStore | undefined,
-  preferB: boolean
+  preferB: boolean,
+  removedMonthlyGoalIds?: string[]
 ): MonthlyGoalsStore {
-  const left = normalizeMonthlyGoalsStore(a);
-  const right = normalizeMonthlyGoalsStore(b);
+  const removed = new Set(mergeRemovedMonthlyGoalIds([], removedMonthlyGoalIds));
+  const left = stripRemovedMonthlyGoals(a, [...removed]);
+  const right = stripRemovedMonthlyGoals(b, [...removed]);
   const months = new Set([...Object.keys(left), ...Object.keys(right)]);
   const out: MonthlyGoalsStore = {};
   for (const month of months) {
     const map = new Map<string, MonthlyGoalItem>();
-    for (const item of left[month] || []) map.set(item.id, item);
+    for (const item of left[month] || []) {
+      if (!removed.has(item.id)) map.set(item.id, item);
+    }
     for (const item of right[month] || []) {
+      if (removed.has(item.id)) continue;
       const prev = map.get(item.id);
       map.set(item.id, prev ? mergeGoalItem(prev, item, preferB) : item);
     }
@@ -176,12 +217,31 @@ export function newMonthlyGoalItem(text: string, monthKey: string): MonthlyGoalI
   };
 }
 
+export function removeMonthlyGoalItem(
+  store: MonthlyGoalsStore,
+  itemId: string,
+  removedMonthlyGoalIds?: string[]
+): { store: MonthlyGoalsStore; removedMonthlyGoalIds: string[] } {
+  const id = String(itemId || '').trim();
+  if (!id) {
+    return {
+      store: normalizeMonthlyGoalsStore(store),
+      removedMonthlyGoalIds: mergeRemovedMonthlyGoalIds([], removedMonthlyGoalIds),
+    };
+  }
+  return {
+    store: stripRemovedMonthlyGoals(store, [id]),
+    removedMonthlyGoalIds: mergeRemovedMonthlyGoalIds(removedMonthlyGoalIds, [id]),
+  };
+}
+
 export function updateMonthlyGoalItems(
   store: MonthlyGoalsStore,
   monthKey: string,
-  items: MonthlyGoalItem[]
+  items: MonthlyGoalItem[],
+  removedMonthlyGoalIds?: string[]
 ): MonthlyGoalsStore {
-  const next = { ...normalizeMonthlyGoalsStore(store) };
+  const next = { ...stripRemovedMonthlyGoals(store, removedMonthlyGoalIds) };
   const cleaned = items
     .map((item) => normalizeItem(item, monthKey))
     .filter((item): item is MonthlyGoalItem => Boolean(item));
@@ -194,13 +254,16 @@ export function toggleMonthlyGoalItem(
   store: MonthlyGoalsStore,
   monthKey: string,
   itemId: string,
-  checked: boolean
+  checked: boolean,
+  removedMonthlyGoalIds?: string[]
 ): MonthlyGoalsStore {
   const stamp = new Date().toISOString();
-  const list = store[monthKey] || [];
+  const base = stripRemovedMonthlyGoals(store, removedMonthlyGoalIds);
+  const list = base[monthKey] || [];
   return updateMonthlyGoalItems(
-    store,
+    base,
     monthKey,
-    list.map((item) => (item.id === itemId ? { ...item, checked, updatedAt: stamp } : item))
+    list.map((item) => (item.id === itemId ? { ...item, checked, updatedAt: stamp } : item)),
+    removedMonthlyGoalIds
   );
 }

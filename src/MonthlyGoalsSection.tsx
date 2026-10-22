@@ -14,6 +14,7 @@ import {
   nextMonthKey,
   prepareMonthlyGoals,
   previousMonthKey,
+  removeMonthlyGoalItem,
   toggleMonthlyGoalItem,
   updateMonthlyGoalItems,
 } from './monthlyGoals';
@@ -164,22 +165,26 @@ export function MonthlyGoalsSection({ student, disabled }: Props) {
   const [error, setError] = useState('');
 
   const prepared = useMemo(
-    () => prepareMonthlyGoals(student.monthlyGoals, monthKey),
-    [student.monthlyGoals, monthKey]
+    () => prepareMonthlyGoals(student.monthlyGoals, monthKey, student.removedMonthlyGoalIds),
+    [student.monthlyGoals, student.removedMonthlyGoalIds, monthKey]
   );
   const items = prepared.monthItems;
   const progress = monthlyGoalsProgress(items);
 
   useEffect(() => {
     if (!prepared.changed || disabled) return;
-    void saveMonthlyGoals(student.id, prepared.store).catch(() => {});
-  }, [prepared.changed, prepared.store, disabled, saveMonthlyGoals, student.id]);
+    void saveMonthlyGoals(student.id, prepared.store, student.removedMonthlyGoalIds).catch(() => {});
+  }, [prepared.changed, prepared.store, disabled, saveMonthlyGoals, student.id, student.removedMonthlyGoalIds]);
 
-  async function persist(store: MonthlyGoalsStore) {
+  async function persist(store: MonthlyGoalsStore, removedMonthlyGoalIds?: string[]) {
     setError('');
     setSaving(true);
     try {
-      await saveMonthlyGoals(student.id, store);
+      await saveMonthlyGoals(
+        student.id,
+        store,
+        removedMonthlyGoalIds ?? student.removedMonthlyGoalIds
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : '저장하지 못했습니다.');
     } finally {
@@ -190,30 +195,39 @@ export function MonthlyGoalsSection({ student, disabled }: Props) {
   async function addGoal() {
     const text = newText.trim();
     if (!text) return;
-    const base = prepareMonthlyGoals(student.monthlyGoals, monthKey).store;
+    const base = prepareMonthlyGoals(student.monthlyGoals, monthKey, student.removedMonthlyGoalIds).store;
     const list = [...(base[monthKey] || []), newMonthlyGoalItem(text, monthKey)];
     setNewText('');
-    await persist(updateMonthlyGoalItems(base, monthKey, list));
+    await persist(
+      updateMonthlyGoalItems(base, monthKey, list, student.removedMonthlyGoalIds),
+      student.removedMonthlyGoalIds
+    );
   }
 
   async function toggleItem(itemId: string, checked: boolean) {
-    const base = prepareMonthlyGoals(student.monthlyGoals, monthKey).store;
-    await persist(toggleMonthlyGoalItem(base, monthKey, itemId, checked));
+    const base = prepareMonthlyGoals(student.monthlyGoals, monthKey, student.removedMonthlyGoalIds).store;
+    await persist(
+      toggleMonthlyGoalItem(base, monthKey, itemId, checked, student.removedMonthlyGoalIds),
+      student.removedMonthlyGoalIds
+    );
   }
 
   async function editItem(itemId: string, text: string) {
     const stamp = new Date().toISOString();
-    const base = prepareMonthlyGoals(student.monthlyGoals, monthKey).store;
+    const base = prepareMonthlyGoals(student.monthlyGoals, monthKey, student.removedMonthlyGoalIds).store;
     const list = (base[monthKey] || []).map((item) =>
       item.id === itemId ? { ...item, text, updatedAt: stamp } : item
     );
-    await persist(updateMonthlyGoalItems(base, monthKey, list));
+    await persist(
+      updateMonthlyGoalItems(base, monthKey, list, student.removedMonthlyGoalIds),
+      student.removedMonthlyGoalIds
+    );
   }
 
   async function removeItem(itemId: string) {
-    const base = prepareMonthlyGoals(student.monthlyGoals, monthKey).store;
-    const list = (base[monthKey] || []).filter((item) => item.id !== itemId);
-    await persist(updateMonthlyGoalItems(base, monthKey, list));
+    const base = prepareMonthlyGoals(student.monthlyGoals, monthKey, student.removedMonthlyGoalIds).store;
+    const removed = removeMonthlyGoalItem(base, itemId, student.removedMonthlyGoalIds);
+    await persist(removed.store, removed.removedMonthlyGoalIds);
   }
 
   return (

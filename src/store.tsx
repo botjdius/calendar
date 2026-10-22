@@ -58,7 +58,7 @@ import {
 } from './cloud';
 import { INSTRUCTOR_INVITE_CODE, isFirebaseConfigured } from './config';
 import { toggleChecklistChecked } from './lessonChecklist';
-import { normalizeMonthlyGoalsStore } from './monthlyGoals';
+import { mergeRemovedMonthlyGoalIds, normalizeMonthlyGoalsStore } from './monthlyGoals';
 import { externalizeStudents, isFilePointer, releaseFilePointer } from './fileCloud.mjs';
 import { auth, db } from './firebase';
 import { discoverHub, emptyBank, emptyShared, fetchBlob, hubAuth, isEphemeralHubUrl, mergeBanks, packBanks, probeHub, putBlob, rememberHubUrl, rememberPublicHubUrl, savedHubUrl, type SharedBlob } from './hub';
@@ -214,7 +214,11 @@ type Store = {
   setInstructorNote: (studentId: string, sessionId: string, note: string) => Promise<void>;
   setStudentNote: (sessionId: string, note: string) => Promise<void>;
   setChecklistItem: (sessionId: string, itemId: string, checked: boolean) => Promise<void>;
-  saveMonthlyGoals: (studentId: string, monthlyGoals: MonthlyGoalsStore) => Promise<void>;
+  saveMonthlyGoals: (
+    studentId: string,
+    monthlyGoals: MonthlyGoalsStore,
+    removedMonthlyGoalIds?: string[]
+  ) => Promise<void>;
   addSessionFile: (studentId: string, sessionId: string, file?: SessionFile) => Promise<void>;
   removeSessionFile: (studentId: string, sessionId: string, fileId: string) => Promise<void>;
   addClosure: (input: Omit<Closure, 'id'>) => Promise<void>;
@@ -2066,9 +2070,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ),
       });
     },
-    async saveMonthlyGoals(studentId, monthlyGoals) {
+    async saveMonthlyGoals(studentId, monthlyGoals, removedMonthlyGoalIds) {
       const packed = normalizeMonthlyGoalsStore(monthlyGoals);
-      const patch = Object.keys(packed).length ? { monthlyGoals: packed } : { monthlyGoals: {} };
+      const removed = mergeRemovedMonthlyGoalIds([], removedMonthlyGoalIds);
+      const patch: Partial<Student> = Object.keys(packed).length
+        ? { monthlyGoals: packed }
+        : { monthlyGoals: {} };
+      if (removed.length) patch.removedMonthlyGoalIds = removed;
       if (user?.role === 'instructor') {
         await api.patchStudent(studentId, patch);
         return;
@@ -2086,6 +2094,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             action: 'student-monthly-goals',
             uid: user.uid,
             monthlyGoals: packed,
+            ...(removed.length ? { removedMonthlyGoalIds: removed } : {}),
           });
           applyShared(await fetchBlob(hubBase.current, user.uid), user.uid);
           return;

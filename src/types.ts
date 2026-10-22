@@ -70,6 +70,7 @@ export type Student = {
   sessions: LessonSession[];
   removedSessionIds?: string[];
   monthlyGoals?: MonthlyGoalsStore;
+  removedMonthlyGoalIds?: string[];
 };
 
 export type RemovedStudent = {

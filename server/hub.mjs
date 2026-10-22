@@ -15,6 +15,7 @@ import {
 import { mergeBanks, packBanks } from './bank.mjs';
 import { mergePushSubscriptions } from './pushStore.mjs';
 import { announcementsForStudent, dropStudentsMissingFrom, fetchCloud, findStudentByJoinCode, joinCodeBlocked, liveStudents, mergeAnnouncements, mergeById, mergeFeedback, mergeOpenSlots, mergeRemovedFeedback, dropRemovedFeedback, mergeRemovedOpenSlots, dropRemovedOpenSlots, mergeRemovedRequests, dropRemovedRequests, mergeRemovedStudents, mergeRequests, mergeStudents, pushCloud, sanitizeFeedback, studentSessionRevoked } from './cloud.mjs';
+import { mergeRemovedMonthlyGoalIds } from '../src/monthlyGoals.ts';
 import { applyRemoveStudent } from './studentRoster.mjs';
 import {
   applyDecideToRequests,
@@ -859,9 +860,19 @@ const server = createServer(async (req, res) => {
           return;
         }
         const monthlyGoals = body.monthlyGoals && typeof body.monthlyGoals === 'object' ? body.monthlyGoals : {};
-        state.students = state.students.map((s) =>
-          s.id === card.id ? { ...s, monthlyGoals } : s
-        );
+        const incomingRemoved = Array.isArray(body.removedMonthlyGoalIds) ? body.removedMonthlyGoalIds : [];
+        state.students = state.students.map((s) => {
+          if (s.id !== card.id) return s;
+          const removedMonthlyGoalIds = mergeRemovedMonthlyGoalIds(
+            s.removedMonthlyGoalIds,
+            incomingRemoved
+          );
+          return {
+            ...s,
+            monthlyGoals,
+            ...(removedMonthlyGoalIds.length ? { removedMonthlyGoalIds } : {}),
+          };
+        });
         bump();
         send(res, 200, { uid: acc.uid, view: viewFor(acc.uid) });
         return;
