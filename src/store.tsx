@@ -205,7 +205,7 @@ type Store = {
     startCycle: CycleIndex;
     firstDate?: string;
   }) => Promise<void>;
-  addSession: (studentId: string, afterSessionId?: string, cycle?: CycleIndex) => Promise<void>;
+  addSession: (studentId: string, afterSessionId?: string, cycle?: CycleIndex, pack?: number) => Promise<void>;
   removeSession: (studentId: string, sessionId: string) => Promise<void>;
   setMakeup: (studentId: string, sessionId: string, makeup: MakeupInfo | null) => Promise<void>;
   setMakeupStatus: (studentId: string, sessionId: string, status: MakeupStatus) => Promise<void>;
@@ -1912,7 +1912,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     async applyFixedSchedule(studentId, input) {
       await api.applyLessonSetup(studentId, { ...input, applyTime: true });
     },
-    async addSession(studentId, afterSessionId, cycle) {
+    async addSession(studentId, afterSessionId, cycle, pack) {
       requireInstructor();
       const list = await currentStudents();
       const found = list.find((s) => s.id === studentId);
@@ -1925,6 +1925,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           time: st.time,
           startCycle: st.startCycle,
           cycle,
+          pack,
           closures: holidays,
         });
         await api.patchStudent(studentId, {

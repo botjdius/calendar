@@ -8,7 +8,23 @@ import { FileAttachButton, FileAttachError } from '../../../src/FileAttachButton
 import { openSessionFile } from '../../../src/files';
 import { PaymentBox, PaymentPillLabel } from '../../../src/PaymentBox';
 import { ScrollPad } from '../../../src/ScrollPad';
-import { closureLabel, formatTime12, isHolidaySession, isLockedSession, isPublicClosure, lastRealSession, paymentBadge, sessionLabel, sortSessions, splitSessionsAroundToday, todayIso, WEEKDAYS, wrapCycle } from '../../../src/schedule';
+import {
+  closureLabel,
+  continuingPackOptions,
+  formatTime12,
+  inferContinuingPack,
+  isHolidaySession,
+  isLockedSession,
+  isPublicClosure,
+  lastRealSession,
+  paymentBadge,
+  sessionLabel,
+  sortSessions,
+  splitSessionsAroundToday,
+  todayIso,
+  WEEKDAYS,
+  wrapCycle,
+} from '../../../src/schedule';
 import { sessionStats, useStore } from '../../../src/store';
 import { colors } from '../../../src/theme';
 import type { CycleIndex, LessonSession } from '../../../src/types';
@@ -66,6 +82,7 @@ export default function StudentDetail() {
   const [editLessonId, setEditLessonId] = useState('');
   const [editMakeupId, setEditMakeupId] = useState('');
   const [addCycle, setAddCycle] = useState<CycleIndex>(1);
+  const [addPack, setAddPack] = useState(0);
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [fileError, setFileError] = useState<Record<string, string>>({});
@@ -88,8 +105,16 @@ export default function StudentDetail() {
   useEffect(() => {
     if (!student) return;
     const last = lastRealSession(student.sessions);
-    setAddCycle(last ? wrapCycle(last.cycle + 1) : student.startCycle || 1);
+    const nextCycle = last ? wrapCycle(last.cycle + 1) : student.startCycle || 1;
+    setAddCycle(nextCycle);
+    setAddPack(inferContinuingPack(last, nextCycle));
   }, [student?.id, student?.sessions.length]);
+
+  useEffect(() => {
+    if (!student) return;
+    const last = lastRealSession(student.sessions);
+    setAddPack(inferContinuingPack(last, addCycle));
+  }, [student?.id, addCycle]);
 
   if (!ready) {
     return <Loading />;
@@ -109,6 +134,7 @@ export default function StudentDetail() {
   const today = todayIso();
   const { upcoming, past } = splitSessionsAroundToday(student.sessions, today);
   const badge = PaymentPillLabel(paymentBadge(student));
+  const packChoices = continuingPackOptions(student.sessions);
 
   function commitSetup(patch: { weekday?: number; time?: string; startCycle?: CycleIndex; firstDate?: string }) {
     const nextWeekday = patch.weekday ?? weekday;
@@ -534,8 +560,25 @@ export default function StudentDetail() {
           <Card>
             <Fold title="이어서 추가">
             <Text style={{ color: colors.muted, marginBottom: 8 }}>
-              회차만 고르면 맨 뒤에 하나 붙습니다. 날짜는 가장 늦은 레슨의 일주일 뒤, 시간은 고정 시간입니다.
+              회차·묶음을 고르면 맨 뒤에 하나 붙습니다. 날짜는 가장 늦은 레슨의 일주일 뒤, 시간은 고정 시간입니다.
             </Text>
+            <Text style={{ color: colors.muted, fontWeight: '600', marginBottom: 6 }}>묶음</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+              {packChoices.map((pack) => (
+                <Pressable
+                  key={pack}
+                  onPress={() => setAddPack(pack)}
+                  style={{
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                    backgroundColor: addPack === pack ? colors.pine : colors.pineSoft,
+                  }}
+                >
+                  <Text style={{ color: addPack === pack ? '#fff' : colors.pine, fontWeight: '800' }}>{pack + 1}묶음</Text>
+                </Pressable>
+              ))}
+            </View>
             <Text style={{ color: colors.muted, fontWeight: '600', marginBottom: 6 }}>회차</Text>
             <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
               {([1, 2, 3, 4] as CycleIndex[]).map((n) => (
@@ -557,7 +600,7 @@ export default function StudentDetail() {
             <Button
               label={student.sessions.length ? `맨 뒤에 ${addCycle}회 추가` : `첫 회차 ${addCycle}회로 추가`}
               tone="clay"
-              onPress={() => addSession(student.id, undefined, addCycle)}
+              onPress={() => addSession(student.id, undefined, addCycle, addPack)}
             />
             </Fold>
           </Card>

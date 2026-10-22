@@ -431,10 +431,33 @@ export function weekAfterLatest(latest: string, time?: string, closures?: Closur
   return skipClosures(addDays(latest, 7), time || '', closures);
 }
 
+export function inferContinuingPack(last: LessonSession | undefined, cycle: CycleIndex) {
+  if (!last) return 0;
+  return cycle <= last.cycle ? (last.pack ?? 0) + 1 : last.pack ?? 0;
+}
+
+/** Pack indices (0-based) the instructor can target when appending a session. */
+export function continuingPackOptions(sessions: LessonSession[]) {
+  const packs = new Set<number>();
+  for (const s of sessions || []) {
+    if (s.status !== 'cancelled') packs.add(s.pack ?? 0);
+  }
+  const max = packs.size ? Math.max(...packs) : -1;
+  packs.add(max + 1);
+  return [...packs].sort((a, b) => a - b);
+}
+
 export function appendContinuingSessions(
   sessions: LessonSession[],
   count: number,
-  opts: { weekday: number; time?: string; startCycle?: CycleIndex; cycle?: CycleIndex; closures?: Closure[] }
+  opts: {
+    weekday: number;
+    time?: string;
+    startCycle?: CycleIndex;
+    cycle?: CycleIndex;
+    pack?: number;
+    closures?: Closure[];
+  }
 ): LessonSession[] {
   const weekday = ((Number(opts.weekday) % 7) + 7) % 7;
   const time = normalizeTime(opts.time || '14:00');
@@ -445,7 +468,10 @@ export function appendContinuingSessions(
     : last
       ? wrapCycle(last.cycle + 1)
       : wrapCycle(opts.startCycle || 1);
-  let pack = last ? (cycle <= last.cycle ? (last.pack ?? 0) + 1 : last.pack ?? 0) : 0;
+  let pack =
+    Number.isInteger(opts.pack) && (opts.pack as number) >= 0
+      ? (opts.pack as number)
+      : inferContinuingPack(last, cycle);
   let date = latest ? weekAfterLatest(latest, time, opts.closures) : nextOnWeekday(todayIso(), weekday);
   const extra: LessonSession[] = [];
   for (let i = 0; i < count; i += 1) {

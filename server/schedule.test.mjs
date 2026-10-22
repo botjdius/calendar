@@ -520,6 +520,13 @@ const samePackPick = appendContinuingSessions(
 );
 assert.equal(samePackPick[1].cycle, 4);
 assert.equal(samePackPick[1].pack, 0);
+const explicitPack = appendContinuingSessions(
+  [{ ...sess('z', '2026-10-07'), cycle: 2, pack: 0 }],
+  1,
+  { weekday: 3, time: '14:00', cycle: 1, pack: 0 }
+);
+assert.equal(explicitPack[1].cycle, 1);
+assert.equal(explicitPack[1].pack, 0);
 const afterMakeup = appendContinuingSessions(
   [
     {

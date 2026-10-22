@@ -342,6 +342,21 @@ export function weekAfterLatest(latest, time, closures) {
   return skipClosures(addDays(latest, 7), time || '', closures);
 }
 
+export function inferContinuingPack(last, cycle) {
+  if (!last) return 0;
+  return cycle <= last.cycle ? (last.pack ?? 0) + 1 : last.pack ?? 0;
+}
+
+export function continuingPackOptions(sessions) {
+  const packs = new Set();
+  for (const s of sessions || []) {
+    if (s.status !== 'cancelled') packs.add(s.pack ?? 0);
+  }
+  const max = packs.size ? Math.max(...packs) : -1;
+  packs.add(max + 1);
+  return [...packs].sort((a, b) => a - b);
+}
+
 export function appendContinuingSessions(sessions, count, opts = {}) {
   const weekday = ((Number(opts.weekday) % 7) + 7) % 7;
   const time = normalizeTime(opts.time || '14:00');
@@ -352,7 +367,8 @@ export function appendContinuingSessions(sessions, count, opts = {}) {
     : last
       ? wrapCycle(last.cycle + 1)
       : wrapCycle(opts.startCycle || 1);
-  let pack = last ? (cycle <= last.cycle ? (last.pack ?? 0) + 1 : last.pack ?? 0) : 0;
+  let pack =
+    Number.isInteger(opts.pack) && opts.pack >= 0 ? opts.pack : inferContinuingPack(last, cycle);
   let date = latest ? weekAfterLatest(latest, time, opts.closures) : nextOnWeekday(todayIso(), weekday);
   const extra = [];
   for (let i = 0; i < count; i += 1) {
