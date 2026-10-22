@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Text, View } from 'react-native';
-import { appendChecklistBlockTemplate, appendChecklistLineToNote } from './lessonChecklist';
+import { appendChecklistLineToNote } from './lessonChecklist';
 import { colors } from './theme';
 import { Button, Field } from './ui';
 
@@ -38,13 +38,6 @@ export function LessonNoteChecklistTools({ note, onChangeNote }: Props) {
             tone="ghost"
             label="빈 체크 줄"
             onPress={() => onChangeNote(appendChecklistLineToNote(note, ''))}
-          />
-        </View>
-        <View style={{ flexGrow: 1, minWidth: 120 }}>
-          <Button
-            tone="ghost"
-            label="체크리스트 예시"
-            onPress={() => onChangeNote(appendChecklistBlockTemplate(note))}
           />
         </View>
       </View>
