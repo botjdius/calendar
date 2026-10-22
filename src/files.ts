@@ -94,7 +94,7 @@ async function uploadToHub(
   hubBase: string,
   file: { id: string; name: string; mime: string; data: string }
 ): Promise<SessionFile> {
-  if (file.data.length > 35_000_000) throw new Error('파일이 너무 큽니다. 25MB 이하로 올려 주세요.');
+  assertAttachSize(bytesFromBase64(file.data), true);
   const res = await fetch(`${hubBase}/files`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

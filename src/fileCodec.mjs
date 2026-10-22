@@ -1,5 +1,5 @@
-export const CLOUD_FILE_MAX = 25_000_000;
-export const HUB_FILE_MAX = 25_000_000;
+export const CLOUD_FILE_MAX = 50_000_000;
+export const HUB_FILE_MAX = 50_000_000;
 export const RENTRY_FILE_MAX = 4_000_000;
 
 export function dataUri(mime, data) {
@@ -17,8 +17,10 @@ export function bytesFromBase64(data) {
   return Math.ceil((String(data || '').length * 3) / 4);
 }
 
-export function assertAttachSize(bytes) {
-  if (bytes > CLOUD_FILE_MAX) throw new Error('파일이 너무 큽니다. 25MB 이하로 올려 주세요.');
+export function assertAttachSize(bytes, hub = false) {
+  const max = hub ? HUB_FILE_MAX : CLOUD_FILE_MAX;
+  const labelMb = Math.round(max / 1_000_000);
+  if (bytes > max) throw new Error(`파일이 너무 큽니다. ${labelMb}MB 이하로 올려 주세요.`);
 }
 
 export function bytesArrayFromBase64(data) {
