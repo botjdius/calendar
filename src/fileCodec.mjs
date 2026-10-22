@@ -1,5 +1,5 @@
-export const CLOUD_FILE_MAX = 50_000_000;
-export const HUB_FILE_MAX = 50_000_000;
+export const CLOUD_FILE_MAX = 100_000_000;
+export const HUB_FILE_MAX = 100_000_000;
 export const RENTRY_FILE_MAX = 4_000_000;
 
 export function dataUri(mime, data) {
