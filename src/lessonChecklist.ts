@@ -72,6 +72,27 @@ export function mergeChecklistChecked(
   return [...new Set([...(preferred || []), ...(fallback || [])])].sort();
 }
 
+/** When a local overlay exists (array), it is authoritative so unchecks stick before/after cloud sync. */
+export function mergeCloudAndLocalChecklist(
+  cloudChecked: string[] | undefined,
+  localOverlay: string[] | null | undefined
+): string[] {
+  if (localOverlay === null || localOverlay === undefined) {
+    return normalizeChecklistChecked(cloudChecked);
+  }
+  return normalizeChecklistChecked(localOverlay);
+}
+
+/** Newer session wins; union only when both sides lack a resolved list (legacy additive merge). */
+export function mergeSessionChecklistChecked(
+  newer: string[] | undefined,
+  older: string[] | undefined
+): string[] {
+  if (newer !== undefined) return normalizeChecklistChecked(newer);
+  if (older !== undefined) return normalizeChecklistChecked(older);
+  return [];
+}
+
 export function toggleChecklistChecked(checked: string[] | undefined, itemId: string, on: boolean): string[] {
   const set = new Set(checked || []);
   if (on) set.add(itemId);

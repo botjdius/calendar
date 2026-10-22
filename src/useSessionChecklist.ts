@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import {
-  mergeCloudAndLocalChecklist,
-  readLocalChecklistChecked,
-  writeLocalChecklistChecked,
-} from './checklistLocalStore';
+import { mergeCloudAndLocalChecklist } from './lessonChecklist';
+import { readLocalChecklistChecked, writeLocalChecklistChecked } from './checklistLocalStore';
 import { toggleChecklistChecked } from './lessonChecklist';
 
 type Args = {
@@ -14,26 +11,26 @@ type Args = {
 };
 
 export function useSessionChecklist({ studentId, sessionId, cloudChecked, setChecklistItem }: Args) {
-  const [localChecked, setLocalChecked] = useState<string[] | undefined>(undefined);
+  const [localOverlay, setLocalOverlay] = useState<string[] | null | undefined>(undefined);
   const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       const local = await readLocalChecklistChecked(studentId, sessionId);
-      if (!cancelled) setLocalChecked(local);
+      if (!cancelled) setLocalOverlay(local);
     })();
     return () => {
       cancelled = true;
     };
   }, [studentId, sessionId]);
 
-  const mergedChecked = mergeCloudAndLocalChecklist(cloudChecked, localChecked);
+  const mergedChecked = mergeCloudAndLocalChecklist(cloudChecked, localOverlay);
 
   const toggleItem = useCallback(
     async (itemId: string, checked: boolean) => {
       const next = toggleChecklistChecked(mergedChecked, itemId, checked);
-      setLocalChecked(next);
+      setLocalOverlay(next);
       await writeLocalChecklistChecked(studentId, sessionId, next);
       setSyncing(true);
       try {
@@ -45,5 +42,5 @@ export function useSessionChecklist({ studentId, sessionId, cloudChecked, setChe
     [mergedChecked, sessionId, setChecklistItem, studentId]
   );
 
-  return { checkedIds: mergedChecked, toggleItem, syncing, localHydrated: localChecked !== undefined };
+  return { checkedIds: mergedChecked, toggleItem, syncing, localHydrated: localOverlay !== undefined };
 }

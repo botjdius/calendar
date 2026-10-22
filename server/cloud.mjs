@@ -225,8 +225,15 @@ function mergeText(preferred, fallback) {
   return String(preferred || '') || String(fallback || '');
 }
 
-function mergeChecklistChecked(preferred, fallback) {
-  return [...new Set([...(preferred || []), ...(fallback || [])])].sort();
+function normalizeChecklistIds(raw) {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.map((id) => String(id || '').trim()).filter(Boolean))].sort();
+}
+
+function mergeSessionChecklistChecked(newer, older) {
+  if (newer !== undefined) return normalizeChecklistIds(newer);
+  if (older !== undefined) return normalizeChecklistIds(older);
+  return [];
 }
 
 export function mergeRemovedSessionIds(current, incoming) {
@@ -287,7 +294,7 @@ function mergeStudent(prev, incoming, incomingNewer) {
       ...newer,
       note: mergeText(newer.note, other.note),
       studentNote: mergeText(newer.studentNote, other.studentNote),
-      checklistChecked: mergeChecklistChecked(newer.checklistChecked, other.checklistChecked),
+      checklistChecked: mergeSessionChecklistChecked(newer.checklistChecked, other.checklistChecked),
       attachments: mergeSessionAttachments(newer.attachments, other.attachments, removedAttachmentIds),
       makeup: newer.makeup !== undefined ? newer.makeup : other.makeup,
       updatedAt: sessionStamp(newer) || sessionStamp(other) || undefined,

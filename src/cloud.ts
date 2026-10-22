@@ -253,11 +253,18 @@ function mergeText(preferred: string | undefined, fallback: string | undefined) 
   return next || prev;
 }
 
-function mergeChecklistChecked(
-  preferred: string[] | undefined,
-  fallback: string[] | undefined
-) {
-  return [...new Set([...(preferred || []), ...(fallback || [])])].sort();
+function normalizeChecklistIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.map((id) => String(id || '').trim()).filter(Boolean))].sort();
+}
+
+function mergeSessionChecklistChecked(
+  newer: string[] | undefined,
+  older: string[] | undefined
+): string[] {
+  if (newer !== undefined) return normalizeChecklistIds(newer);
+  if (older !== undefined) return normalizeChecklistIds(older);
+  return [];
 }
 
 export function mergeRemovedSessionIds(current?: string[], incoming?: string[]): string[] {
@@ -318,7 +325,7 @@ function mergeStudent(prev: Student, incoming: Student, incomingNewer: boolean):
       ...newer,
       note: mergeText(newer.note, other.note),
       studentNote: mergeText(newer.studentNote, other.studentNote),
-      checklistChecked: mergeChecklistChecked(newer.checklistChecked, other.checklistChecked),
+      checklistChecked: mergeSessionChecklistChecked(newer.checklistChecked, other.checklistChecked),
       attachments: mergeSessionAttachments(newer.attachments, other.attachments, removedAttachmentIds),
       makeup: newer.makeup !== undefined ? newer.makeup : other.makeup,
       updatedAt: sessionStamp(newer) || sessionStamp(other) || undefined,

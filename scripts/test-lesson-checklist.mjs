@@ -5,6 +5,8 @@ import {
   lessonChecklistProgress,
   lessonReadingBlocks,
   mergeChecklistChecked,
+  mergeCloudAndLocalChecklist,
+  mergeSessionChecklistChecked,
   parseLessonContent,
   toggleChecklistChecked,
 } from '../src/lessonChecklist.ts';
@@ -22,6 +24,24 @@ const progress = lessonChecklistProgress(note, ['item-0']);
 assert(progress.done === 1 && progress.total === 2, 'progress counts student checks only');
 assert(mergeChecklistChecked(['item-0'], ['item-1']).join() === 'item-0,item-1', 'merge unions checks');
 assert(toggleChecklistChecked(['item-0'], 'item-0', false).length === 0, 'toggle off');
+assert(toggleChecklistChecked(['item-0', 'item-1'], 'item-0', false).join() === 'item-1', 'toggle off one of many');
+assert(
+  mergeCloudAndLocalChecklist(['item-0'], null).join() === 'item-0',
+  'no local overlay uses cloud'
+);
+assert(mergeCloudAndLocalChecklist(['item-0'], []).length === 0, 'local overlay can uncheck all');
+assert(
+  mergeCloudAndLocalChecklist(['item-0', 'item-1'], ['item-1']).join() === 'item-1',
+  'local overlay replaces cloud for uncheck'
+);
+assert(
+  mergeSessionChecklistChecked(['item-1'], ['item-0', 'item-1']).join() === 'item-1',
+  'session merge prefers newer checklist'
+);
+assert(
+  mergeSessionChecklistChecked([], ['item-0']).length === 0,
+  'session merge newer empty unchecks'
+);
 assert(checklistMarkdownLine('A') === '- [ ] A', 'markdown line');
 assert(appendChecklistLineToNote('hello', 'B').endsWith('- [ ] B\n'), 'append line');
 assert(appendChecklistBlockTemplate('').includes('연습 항목 1'), 'template');
