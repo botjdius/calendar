@@ -475,14 +475,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       removedStudents: removed,
       pushSubscriptions: mergePushSubscriptions(latest.pushSubscriptions, shared.pushSubscriptions),
       sessionUid: uid ?? latest.sessionUid,
-      dirty: incomplete ? latest.dirty || dirtyRef.current : false,
+      dirty: Boolean(latest.dirty || dirtyRef.current),
     });
     setRequests(requests);
     setAnnouncements((current) => mergeAnnouncements(current, shared.announcements || [], true));
     showFeedback(feedback, uid, incomplete ? latest.accounts : shared.accounts || latest.accounts, removedFeedback);
     if (!incomplete) {
-      dirtyRef.current = false;
-      dataVersionRef.current = shared.version || latest.version || 0;
+      dataVersionRef.current = Math.max(shared.version || 0, latest.version || 0, dataVersionRef.current || 0);
     }
   }
 
@@ -524,6 +523,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const base = hubBase.current;
     if (base) void flushDirty(base);
     void pushCloudSnapshot();
+  }
+
+  async function tryClearDirtyIfRemotesCaughtUp(): Promise<boolean> {
+    if (!dirtyRef.current) return true;
+    const local = await loadDevice();
+    const localVer = Math.max(local.version || 0, dataVersionRef.current || 0);
+    if (isCloudConfigured) {
+      const cloud = await fetchCloud();
+      if (!cloud || (cloud.version || 0) < localVer) return false;
+    }
+    const base = hubBase.current;
+    const uid = sessionUidRef.current;
+    if (base && uid) {
+      try {
+        const hub = await fetchBlob(base, uid);
+        if ((hub.version || 0) < localVer) return false;
+      } catch {
+        return false;
+      }
+    }
+    dirtyRef.current = false;
+    await saveDevice({ ...(await loadDevice()), dirty: false });
+    return true;
   }
 
   async function pushCloudSnapshot() {
@@ -606,7 +628,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const feedbackChanged = JSON.stringify(mergedFeedback) !== JSON.stringify(local.feedback || []);
     const incomingNewer = (cloud.version || 0) > (local.version || dataVersionRef.current || 0);
     const latest = await loadDevice();
-    if (!force && (writeGenRef.current !== gen || latest.dirty || dirtyRef.current)) {
+    const localVer = Math.max(latest.version || 0, dataVersionRef.current || 0);
+    const keepLocalStudents =
+      !force &&
+      (writeGenRef.current !== gen || latest.dirty || dirtyRef.current || (cloud.version || 0) < localVer);
+    if (keepLocalStudents) {
       const keptRemovedFeedback = mergeRemovedFeedback(latest.removedFeedback, cloud.removedFeedback);
       const keptRemovedRequests = mergeRemovedRequests(latest.removedRequests, cloud.removedRequests);
       const keptRemovedOpenSlots = mergeRemovedOpenSlots(latest.removedOpenSlots, cloud.removedOpenSlots);
@@ -791,8 +817,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         );
         const openSlotsChanged = JSON.stringify(incomingSlots) !== JSON.stringify(local.openSlots || []);
         const incomplete = Boolean(sessionUidRef.current) && !(next.accounts || []).some((a) => a.uid === sessionUidRef.current);
-        const versionChanged = !incomplete && (next.version || 0) !== dataVersionRef.current;
-        if (!versionChanged && !requestsChanged && !announcementsChanged && !feedbackChanged && !openSlotsChanged) return;
+        const localVersion = Math.max(local.version || 0, dataVersionRef.current || 0);
+        const hubVersion = next.version || 0;
+        const hubAhead = !incomplete && hubVersion > localVersion;
+        const hubBehind = !incomplete && hubVersion < localVersion;
+        if (!hubAhead && !hubBehind && !requestsChanged && !announcementsChanged && !feedbackChanged && !openSlotsChanged) {
+          return;
+        }
         if (dirtyRef.current || incomplete) {
           if (requestsChanged || announcementsChanged || feedbackChanged || openSlotsChanged) {
             rememberRemovedOpenSlots(removedOpenSlots);
@@ -811,12 +842,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           return;
         }
-        if (versionChanged) {
+        if (hubBehind) {
+          await flushDirty(base);
+          return;
+        }
+        if (hubAhead) {
           setStudents((next.students || []).map((s) => normalizeStudent(s)));
           setClosures(next.closures);
           applyPacked(next.bank, next.banks);
         }
-        if (versionChanged || openSlotsChanged) {
+        if (hubAhead || openSlotsChanged) {
           rememberRemovedOpenSlots(removedOpenSlots);
           setOpenSlots(incomingSlots);
         }
@@ -824,7 +859,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setAnnouncements(incomingAnnouncements);
         showFeedback(incomingFeedback, sessionUidRef.current, next.accounts?.length ? next.accounts : local.accounts);
         await cacheHubView(
-          versionChanged
+          hubAhead
             ? { ...next, requests: incomingRequests, announcements: incomingAnnouncements, feedback: incomingFeedback, openSlots: incomingSlots, removedOpenSlots }
             : {
                 ...local,
@@ -1014,13 +1049,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (writeLockRef.current) return;
           void (async () => {
             if (dirtyRef.current) {
-              const ok = await pushCloudSnapshot();
-              if (ok) {
-                dirtyRef.current = false;
-                const local = await loadDevice();
-                await saveDevice({ ...local, dirty: false });
-                if (!hubBase.current) setSyncMode('cloud');
-              }
+              await pushCloudSnapshot();
+              if (await tryClearDirtyIfRemotesCaughtUp() && !hubBase.current) setSyncMode('cloud');
               return;
             }
             void applyCloudIfNewer(sessionUidRef.current);
@@ -1309,13 +1339,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     const cloudOk = isCloudConfigured ? await pushCloudSnapshot() : hubOk;
     if (cloudOk) {
-      dirtyRef.current = false;
-      const local = await loadDevice();
-      await saveDevice({ ...local, dirty: false });
-      if (!hubBase.current) setSyncMode('cloud');
+      await tryClearDirtyIfRemotesCaughtUp();
+      if (!hubBase.current && !dirtyRef.current) setSyncMode('cloud');
       return true;
     }
-    if (hubOk) return true;
+    if (hubOk) {
+      await tryClearDirtyIfRemotesCaughtUp();
+      return true;
+    }
     if (isCloudConfigured) {
       throw new Error('클라우드에 저장하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.');
     }
