@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -158,6 +158,9 @@ function GoalRow({
 
 export function MonthlyGoalsSection({ student, disabled }: Props) {
   const { saveMonthlyGoals } = useStore();
+  const saveMonthlyGoalsRef = useRef(saveMonthlyGoals);
+  saveMonthlyGoalsRef.current = saveMonthlyGoals;
+  const rolloverFlightRef = useRef(false);
   const [monthKey, setMonthKey] = useState(currentMonthKey());
   const [newText, setNewText] = useState('');
   const [saving, setSaving] = useState(false);
@@ -169,11 +172,20 @@ export function MonthlyGoalsSection({ student, disabled }: Props) {
   );
   const items = prepared.monthItems;
   const progress = monthlyGoalsProgress(items);
+  const rolloverPayload = prepared.changed ? JSON.stringify(prepared.store) : '';
 
   useEffect(() => {
-    if (!prepared.changed || disabled) return;
-    void saveMonthlyGoals(student.id, prepared.store).catch(() => {});
-  }, [prepared.changed, prepared.store, disabled, saveMonthlyGoals, student.id]);
+    if (!prepared.changed || disabled || rolloverFlightRef.current) return;
+    rolloverFlightRef.current = true;
+    const payload = prepared.store;
+    void saveMonthlyGoalsRef
+      .current(student.id, payload)
+      .catch(() => {})
+      .finally(() => {
+        rolloverFlightRef.current = false;
+      });
+    // Intentionally omit saveMonthlyGoals — store recreates it every persistShared/setStudents.
+  }, [student.id, monthKey, prepared.changed, rolloverPayload, disabled]);
 
   async function persist(store: MonthlyGoalsStore) {
     setError('');

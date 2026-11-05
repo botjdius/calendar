@@ -1,4 +1,5 @@
 import { mergeStudents } from '../server/cloud.mjs';
+import { normalizeMonthlyGoalsStore, prepareMonthlyGoals } from '../src/monthlyGoals.ts';
 
 function assert(cond, message) {
   if (!cond) throw new Error(message);
@@ -163,9 +164,22 @@ function testSingleSaveSurvivesPollCycles() {
   simulatePollCycles(5, save);
 }
 
+function testMonthlyGoalsRolloverStableAfterPersist() {
+  const store = {
+    '2026-09': [{ id: 'a', text: '스케일', checked: false, createdMonth: '2026-09' }],
+  };
+  const view = prepareMonthlyGoals(store, '2026-10');
+  assert(view.changed, 'rollover should be pending before persist');
+  const packed = normalizeMonthlyGoalsStore(view.store);
+  const after = prepareMonthlyGoals(packed, '2026-10');
+  assert(!after.changed, 'persisted rollover must not re-trigger save effect');
+  console.log('ok monthly goals rollover stable after persist');
+}
+
 testStaleCloudDoesNotBeatLocalMakeupWhenLocalNewer();
 testEqualVersionCloudTieKeepsLocalMakeup();
 testStaleHubMustNotRefreshStudents();
 testHubAheadRefreshesStudents();
 testSingleSaveSurvivesPollCycles();
+testMonthlyGoalsRolloverStableAfterPersist();
 console.log('ok instructor save reset merge guards');

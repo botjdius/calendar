@@ -32,6 +32,7 @@ import { studentShareLink, useLanInfo } from '../../../src/share';
 import { MonthlyGoalsSection } from '../../../src/MonthlyGoalsSection';
 import { LessonContentView } from '../../../src/LessonContentView';
 import { LessonNoteChecklistTools } from '../../../src/LessonNoteChecklistTools';
+import { useKeyedSaveFeedback } from '../../../src/useSaveActionFeedback';
 import { Button, Card, ConfirmBox, Field, Fold, Loading, Pill, Screen } from '../../../src/ui';
 
 function paramId(value: string | string[] | undefined) {
@@ -89,6 +90,7 @@ export default function StudentDetail() {
   const [fileError, setFileError] = useState<Record<string, string>>({});
   const lan = useLanInfo();
   const shareLink = student ? studentShareLink(student.joinCode, lan) : '';
+  const saveFeedback = useKeyedSaveFeedback();
 
   useEffect(() => {
     if (student) {
@@ -174,6 +176,9 @@ export default function StudentDetail() {
     const holiday = isHolidaySession(session);
     const lessonOpen = editLessonId === session.id;
     const makeupOpen = editMakeupId === session.id;
+    const makeupKey = `makeup:${session.id}`;
+    const noteKey = `note:${session.id}`;
+    const statusKey = (kind: string) => `status:${session.id}:${kind}`;
     return (
       <Card key={session.id}>
         <Text style={{ fontWeight: '800', fontSize: 18 }}>
@@ -266,28 +271,65 @@ export default function StudentDetail() {
                   onChange={(t) => setMakeupTime((p) => ({ ...p, [session.id]: t }))}
                 />
                 <Button
-                  label="이 회차 보강으로 대체"
+                  label={saveFeedback.buttonLabel(makeupKey, '이 회차 보강으로 대체')}
+                  disabled={saveFeedback.busy(makeupKey)}
                   onPress={() => {
                     const date = makeupDate[session.id] || session.makeup?.date;
                     const t = makeupTime[session.id] || session.makeup?.time || session.time;
                     if (!date) return;
-                    setMakeup(student.id, session.id, { date, time: t, status: 'planned' });
+                    void saveFeedback.run(makeupKey, () =>
+                      setMakeup(student.id, session.id, { date, time: t, status: 'planned' })
+                    );
                   }}
                 />
                 {session.makeup ? (
-                  <Button tone="ghost" label="보강 취소" onPress={() => setMakeup(student.id, session.id, null)} />
+                  <Button
+                    tone="ghost"
+                    label={saveFeedback.buttonLabel(`${makeupKey}:clear`, '보강 취소')}
+                    disabled={saveFeedback.busy(`${makeupKey}:clear`)}
+                    onPress={() =>
+                      void saveFeedback.run(`${makeupKey}:clear`, () => setMakeup(student.id, session.id, null))
+                    }
+                  />
                 ) : null}
               </>
             ) : null}
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
               <View style={{ flex: 1 }}>
-                <Button label="출석" tone="clay" onPress={() => setSessionStatus(student.id, session.id, 'attended')} />
+                <Button
+                  label={saveFeedback.buttonLabel(statusKey('attended'), '출석')}
+                  tone="clay"
+                  disabled={saveFeedback.busy(statusKey('attended'))}
+                  onPress={() =>
+                    void saveFeedback.run(statusKey('attended'), () =>
+                      setSessionStatus(student.id, session.id, 'attended')
+                    )
+                  }
+                />
               </View>
               <View style={{ flex: 1 }}>
-                <Button label="불참" tone="wine" onPress={() => setSessionStatus(student.id, session.id, 'absent')} />
+                <Button
+                  label={saveFeedback.buttonLabel(statusKey('absent'), '불참')}
+                  tone="wine"
+                  disabled={saveFeedback.busy(statusKey('absent'))}
+                  onPress={() =>
+                    void saveFeedback.run(statusKey('absent'), () =>
+                      setSessionStatus(student.id, session.id, 'absent')
+                    )
+                  }
+                />
               </View>
             </View>
-            <Button tone="ghost" label="대기로" onPress={() => setSessionStatus(student.id, session.id, 'pending')} />
+            <Button
+              tone="ghost"
+              label={saveFeedback.buttonLabel(statusKey('pending'), '대기로')}
+              disabled={saveFeedback.busy(statusKey('pending'))}
+              onPress={() =>
+                void saveFeedback.run(statusKey('pending'), () =>
+                  setSessionStatus(student.id, session.id, 'pending')
+                )
+              }
+            />
             <LessonContentView note={session.note} checkedIds={session.checklistChecked} />
             <Field
               label="수업 내용"
@@ -302,8 +344,20 @@ export default function StudentDetail() {
               onChangeNote={(next) => setNotes((p) => ({ ...p, [session.id]: next }))}
             />
             <Button
-              label="수업 내용 저장"
-              onPress={() => setInstructorNote(student.id, session.id, notes[session.id] ?? session.note)}
+              label={saveFeedback.buttonLabel(noteKey, '수업 내용 저장')}
+              disabled={saveFeedback.busy(noteKey)}
+              onPress={() =>
+                void saveFeedback.run(noteKey, async () => {
+                  const text = notes[session.id] ?? session.note;
+                  await setInstructorNote(student.id, session.id, text);
+                  setNotes((p) => {
+                    if (p[session.id] === undefined) return p;
+                    const next = { ...p };
+                    delete next[session.id];
+                    return next;
+                  });
+                })
+              }
             />
             {(session.attachments || []).map((f) => (
               <View
