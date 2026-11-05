@@ -112,11 +112,12 @@ export function sessionLabel(session: LessonSession) {
 }
 
 export function applyAttendance(session: LessonSession, status: LessonSession['status']): LessonSession {
+  const stamp = new Date().toISOString();
   if (session.makeup && status !== 'cancelled') {
     const makeupStatus = status === 'attended' ? 'done' : status === 'absent' ? 'absent' : 'planned';
-    return { ...session, makeup: { ...session.makeup, status: makeupStatus } };
+    return { ...session, makeup: { ...session.makeup, status: makeupStatus }, updatedAt: stamp };
   }
-  return { ...session, status };
+  return { ...session, status, updatedAt: stamp };
 }
 
 export function sessionStats(student: Student) {
@@ -772,9 +773,12 @@ export function applyMakeupReplacement(
   makeup: MakeupInfo | null,
   _closures: Closure[] = []
 ): Student {
+  const stamp = new Date().toISOString();
   return {
     ...student,
-    sessions: (student.sessions || []).map((s) => (s.id === sessionId ? { ...s, makeup } : s)),
+    sessions: (student.sessions || []).map((s) =>
+      s.id === sessionId ? { ...s, makeup, updatedAt: stamp } : s
+    ),
   };
 }
 

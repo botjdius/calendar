@@ -328,7 +328,13 @@ function mergeStudent(prev: Student, incoming: Student, incomingNewer: boolean):
       studentNote: mergeText(newer.studentNote, other.studentNote),
       checklistChecked: mergeSessionChecklistChecked(newer.checklistChecked, other.checklistChecked),
       attachments: mergeSessionAttachments(newer.attachments, other.attachments, removedAttachmentIds),
-      makeup: newer.makeup !== undefined ? newer.makeup : other.makeup,
+      makeup: incomingWins
+        ? session.makeup !== undefined
+          ? session.makeup
+          : older.makeup
+        : older.makeup !== undefined
+          ? older.makeup
+          : session.makeup,
       updatedAt: sessionStamp(newer) || sessionStamp(other) || undefined,
     };
     if (removedAttachmentIds.length) mergedSession.removedAttachmentIds = removedAttachmentIds;

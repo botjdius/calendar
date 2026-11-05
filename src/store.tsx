@@ -590,6 +590,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }
 
   async function applyCloudIfNewer(uid: string | null, force = false) {
+    if (writeLockRef.current) return false;
     const gen = writeGenRef.current;
     const cloud = await fetchCloud();
     if (!cloud) return false;
@@ -619,10 +620,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         keptRemovedFeedback
       );
       const keptRemovedStudents = mergeRemovedStudents(latest.removedStudents, cloud.removedStudents);
-      const keptStudents = liveStudents(
-        mergeStudents(latest.students, cloud.students || [], incomingNewer || force),
-        keptRemovedStudents
-      );
+      // Pending local writes already bumped version; never merge stale cloud students over dirty state.
+      const keptStudents = liveStudents(latest.students || [], keptRemovedStudents);
+      const keptClosures = latest.closures || [];
       let keptOpenSlots = dropRemovedOpenSlots(
         mergeOpenSlots(latest.openSlots, cloud.openSlots || [], incomingNewer || force),
         keptRemovedOpenSlots
@@ -631,7 +631,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const cloudIds = new Set((cloud.openSlots || []).map((item) => item.id));
         keptOpenSlots = keptOpenSlots.filter((item) => cloudIds.has(item.id));
       }
-      const studentsChanged = JSON.stringify(keptStudents) !== JSON.stringify(latest.students || []);
+      const studentsChanged = false;
       const keptRequestsChanged = JSON.stringify(kept) !== JSON.stringify(latest.requests || []);
       const keptAnnouncementsChanged =
         JSON.stringify(keptAnnouncements) !== JSON.stringify(latest.announcements || []);
@@ -642,6 +642,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await saveDevice({
           ...latest,
           students: keptStudents,
+          closures: keptClosures,
           requests: kept,
           announcements: keptAnnouncements,
           feedback: keptFeedback,
@@ -651,7 +652,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           removedOpenSlots: keptRemovedOpenSlots,
           removedStudents: keptRemovedStudents,
         });
-        setStudents(keptStudents.map((s) => normalizeStudent(s)));
         setRequests(kept);
         setAnnouncements(keptAnnouncements);
         setOpenSlots(keptOpenSlots);
@@ -872,8 +872,55 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       await cacheHubView(saved, uid);
     } else {
       const next = await fetchBlob(base, uid);
-      applyShared(next, uid);
-      await cacheHubView(next, uid);
+      const localVersion = local.version || dataVersionRef.current || 0;
+      const hubVersion = next.version || 0;
+      if (hubVersion > localVersion) {
+        applyShared(next, uid);
+        await cacheHubView(next, uid);
+      } else if (uid && localVersion > hubVersion) {
+        const saved = await putBlob(base, uid, {
+          accounts: local.accounts,
+          students: local.students,
+          closures: local.closures,
+          openSlots: local.openSlots,
+          requests: local.requests,
+          announcements: local.announcements || [],
+          feedback: local.feedback || [],
+          ...packBanks(local.bank, local.banks),
+          removedStudents: local.removedStudents || [],
+          removedFeedback: local.removedFeedback || [],
+          removedRequests: local.removedRequests || [],
+          removedOpenSlots: local.removedOpenSlots || [],
+          pushSubscriptions: local.pushSubscriptions || [],
+        });
+        applyShared(saved, uid);
+        await cacheHubView(saved, uid);
+      } else {
+        const removed = mergeRemovedStudents(local.removedStudents, next.removedStudents);
+        const merged: SharedBlob = {
+          ...next,
+          version: Math.max(localVersion, hubVersion),
+          students: liveStudents(mergeStudents(local.students, next.students, false), removed),
+          closures: mergeById(local.closures, next.closures, false),
+          openSlots: dropRemovedOpenSlots(
+            mergeOpenSlots(local.openSlots, next.openSlots, false),
+            mergeRemovedOpenSlots(local.removedOpenSlots, next.removedOpenSlots)
+          ),
+          requests: dropRemovedRequests(
+            mergeRequests(local.requests, next.requests),
+            mergeRemovedRequests(local.removedRequests, next.removedRequests)
+          ),
+          announcements: mergeAnnouncements(local.announcements, next.announcements || [], false),
+          feedback: dropRemovedFeedback(
+            mergeFeedback(local.feedback, next.feedback),
+            mergeRemovedFeedback(local.removedFeedback, next.removedFeedback)
+          ),
+          removedStudents: removed,
+          ...mergeBanks(local, next),
+        };
+        applyShared(merged, uid);
+        await cacheHubView(merged, uid);
+      }
     }
     startHubPoll(base);
     void applyCloudIfNewer(uid, false);
@@ -1111,7 +1158,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         blob.removedOpenSlots,
         mergeRemovedOpenSlots(cloud?.removedOpenSlots, patch.removedOpenSlots)
       );
-      const incomingNewer = (cloud?.version || 0) >= (blob.version || dataVersionRef.current || 0);
+      const incomingNewer = (cloud?.version || 0) > (blob.version || dataVersionRef.current || 0);
       let mergedStudents = cloud ? mergeStudents(blob.students, cloud.students, incomingNewer) : blob.students;
       mergedStudents = liveStudents(mergedStudents, removedStudents);
       if (cloud && incomingNewer && (cloud.students || []).length) {
