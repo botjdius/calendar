@@ -164,4 +164,6 @@ export type Announcement = {
   createdAt: string;
   expiresOn?: string;
   deletedAt?: string;
+  /** When set, this row mirrors a studio-wide closure; removed when the closure is deleted. */
+  linkedClosureId?: string;
 };

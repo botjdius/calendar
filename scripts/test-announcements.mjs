@@ -70,4 +70,25 @@ assert(
   'instructor sees the same date window as students (expired notices hidden)'
 );
 
+const closureId = 'closure-x';
+const holidayTop = {
+  id: 'holiday-notice-1',
+  title: '휴강 일정',
+  body: '9/16(화) 종일 · 시험 레슨·보강이 휴강입니다.',
+  studentIds: ['student-a'],
+  createdAt: '2026-09-15T10:00:00.000Z',
+  expiresOn: '2026-09-16',
+  linkedClosureId: closureId,
+};
+assert(
+  announcementsForStudent([holidayTop], 'student-a', '2026-09-15').length === 1,
+  'linked 휴강 공지 shows before expiry'
+);
+const retiredHoliday = { ...holidayTop, deletedAt: '2026-09-15T11:00:00.000Z' };
+const afterDelete = mergeAnnouncements([holidayTop], [retiredHoliday], true);
+assert(
+  announcementsForStudent(afterDelete, 'student-a', '2026-09-15').length === 0,
+  'soft-delete removes linked 휴강 공지 when closure is removed'
+);
+
 console.log('ok announcements persist and filter by recipient');

@@ -35,6 +35,9 @@ import {
   applyAllHolidays,
   applyAttendance,
   applyLessonSetup,
+  CLOSURE_ANNOUNCEMENT_TITLE,
+  closureAnnouncementBody,
+  closureEnd,
   isPublicClosure,
   makeupRequestBlockReason,
   nid as makeId,
@@ -198,6 +201,21 @@ function notifyClosureStudents(closure, roster) {
       tag: `closure-${closure.id}`,
     }
   );
+}
+
+function buildClosureAnnouncement(closure, rosterAfterApply) {
+  if (!isPublicClosure(closure)) return null;
+  const eligible = studentsAffectedByClosure(rosterAfterApply, closure);
+  if (!eligible.length) return null;
+  return {
+    id: nid(),
+    title: CLOSURE_ANNOUNCEMENT_TITLE,
+    body: closureAnnouncementBody(closure),
+    studentIds: eligible.map((student) => student.id),
+    createdAt: new Date().toISOString(),
+    expiresOn: closureEnd(closure),
+    linkedClosureId: closure.id,
+  };
 }
 
 function makeupPushBody(req) {
@@ -928,6 +946,10 @@ const server = createServer(async (req, res) => {
         const roster = state.students;
         state.closures = [item, ...state.closures];
         state.students = applyAllHolidays(state.students, state.closures);
+        const notice = buildClosureAnnouncement(item, state.students);
+        if (notice) {
+          state.announcements = mergeAnnouncements(state.announcements, [notice], true);
+        }
         bump();
         notifyClosureStudents(item, roster);
         send(res, 200, { uid: body.uid, view: viewFor(body.uid) });
@@ -1016,7 +1038,16 @@ const server = createServer(async (req, res) => {
           send(res, 403, { error: '강사만 휴강을 지울 수 있습니다.' });
           return;
         }
-        state.closures = state.closures.filter((c) => c.id !== body.id);
+        const removedId = String(body.id || '');
+        const stamp = new Date().toISOString();
+        state.closures = state.closures.filter((c) => c.id !== removedId);
+        state.announcements = mergeAnnouncements(
+          state.announcements,
+          (state.announcements || [])
+            .filter((a) => a.linkedClosureId === removedId && !a.deletedAt)
+            .map((a) => ({ ...a, deletedAt: stamp })),
+          true
+        );
         bump();
         send(res, 200, { uid: body.uid, view: viewFor(body.uid) });
         return;

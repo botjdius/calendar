@@ -74,6 +74,9 @@ import {
   applyAttendance,
   applyLessonSetup,
   applyMakeupReplacement,
+  CLOSURE_ANNOUNCEMENT_TITLE,
+  closureAnnouncementBody,
+  closureEnd,
   formatWeekly,
   appendContinuingSessions,
   generatePack,
@@ -90,6 +93,7 @@ import {
   removeSessionById,
   retargetFollowing,
   sequenceSessions,
+  studentsAffectedByClosure,
   todayIso,
   upsertPayment,
 } from './schedule';
@@ -245,6 +249,21 @@ const StoreContext = createContext<Store | null>(null);
 
 function nid() {
   return makeId();
+}
+
+function buildClosureAnnouncement(closure: Closure, roster: Student[]): Announcement | null {
+  if (!isPublicClosure(closure)) return null;
+  const eligible = studentsAffectedByClosure(roster, closure);
+  if (!eligible.length) return null;
+  return {
+    id: nid(),
+    title: CLOSURE_ANNOUNCEMENT_TITLE,
+    body: closureAnnouncementBody(closure),
+    studentIds: eligible.map((s) => s.id),
+    createdAt: nowIso(),
+    expiresOn: closureEnd(closure),
+    linkedClosureId: closure.id,
+  };
 }
 
 function makeJoinCode() {
@@ -2243,25 +2262,44 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const shared = await currentShared();
       const roster = shared.students.map(normalizeStudent);
       const studentsNext = applyAllHolidays(roster, [item, ...shared.closures]);
+      const notice = buildClosureAnnouncement(item, studentsNext);
       if (firebaseOn) {
         await setDoc(doc(db!, 'closures', item.id), item);
         for (const st of studentsNext) {
           await updateDoc(doc(db!, 'students', st.id), { sessions: st.sessions });
         }
+        if (notice) await setDoc(doc(db!, 'announcements', notice.id), notice);
         notifyClosureStudents(item, roster);
         return;
       }
-      await persistShared({ closures: [item, ...shared.closures], students: studentsNext });
+      await persistShared({
+        closures: [item, ...shared.closures],
+        students: studentsNext,
+        ...(notice ? { announcements: [notice] } : {}),
+      });
       notifyClosureStudents(item, roster);
     },
     async removeClosure(id) {
       requireInstructor();
+      const stamp = nowIso();
       if (firebaseOn) {
         await deleteDoc(doc(db!, 'closures', id));
+        for (const ann of announcements) {
+          if (ann.linkedClosureId === id && !ann.deletedAt) {
+            await updateDoc(doc(db!, 'announcements', ann.id), { deletedAt: stamp });
+          }
+        }
         return;
       }
       const shared = await currentShared();
-      await persistShared({ closures: shared.closures.filter((c) => c.id !== id) });
+      const toRetire = (shared.announcements || []).filter(
+        (a) => a.linkedClosureId === id && !a.deletedAt
+      );
+      const retired = toRetire.map((a) => ({ ...a, deletedAt: stamp }));
+      await persistShared({
+        closures: shared.closures.filter((c) => c.id !== id),
+        ...(retired.length ? { announcements: retired } : {}),
+      });
     },
     async addOpenSlot(input) {
       requireInstructor();

@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'jyang-jyang-pwa-v17';
+const CACHE_VERSION = 'jyang-jyang-pwa-v18';
 const APP_SHELL = [
   '/',
   '/manifest.json',

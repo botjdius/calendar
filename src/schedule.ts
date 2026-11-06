@@ -1075,6 +1075,14 @@ export function closureWhenLabel(c: Pick<Closure, 'date' | 'endDate' | 'time' | 
   return [`${startDay}${range}`, when, reason ? `· ${reason}` : ''].filter(Boolean).join(' ');
 }
 
+/** Body text for in-app “휴강 일정” notices (matches push copy). */
+export function closureAnnouncementBody(c: Pick<Closure, 'date' | 'endDate' | 'time' | 'reason'>) {
+  const when = closureWhenLabel(c);
+  return when ? `${when} 레슨·보강이 휴강입니다.` : '등록된 휴강이 있습니다.';
+}
+
+export const CLOSURE_ANNOUNCEMENT_TITLE = '휴강 일정';
+
 export function applyAllHolidays(students: Student[], closures: Closure[]): Student[] {
   return students.map((st) => {
     const original = new Map((st.sessions || []).map((session) => [session.id, session.date]));

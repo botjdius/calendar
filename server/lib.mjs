@@ -797,6 +797,14 @@ export function closureWhenLabel(c) {
   return [`${startDay}${range}`, when, reason ? `· ${reason}` : ''].filter(Boolean).join(' ');
 }
 
+/** In-app notice body (same wording as 휴강 push). */
+export function closureAnnouncementBody(c) {
+  const when = closureWhenLabel(c);
+  return when ? `${when} 레슨·보강이 휴강입니다.` : '등록된 휴강이 있습니다.';
+}
+
+export const CLOSURE_ANNOUNCEMENT_TITLE = '휴강 일정';
+
 export function isHolidaySession(session) {
   return session.status === 'cancelled';
 }
