@@ -14,7 +14,6 @@ import {
   formatTime12,
   inferContinuingPack,
   isHolidaySession,
-  isSyntheticHolidayHold,
   isLockedSession,
   isClosureActive,
   isPublicClosure,
@@ -231,11 +230,11 @@ export default function StudentDetail() {
             </>
           )}
         </View>
-        {holiday && !isSyntheticHolidayHold(session) ? (
+        {holiday ? (
           <Text style={{ color: colors.wine, marginTop: 8, fontWeight: '800' }}>
             다음 주에 {session.cycle}회가 다시 시작합니다.
           </Text>
-        ) : !holiday ? (
+        ) : (
           <>
             <PaymentBox
               student={lessonCard}
@@ -419,7 +418,7 @@ export default function StudentDetail() {
             />
             <FileAttachError message={fileError[session.id] || ''} />
           </>
-        ) : null}
+        )}
         {askRemoveSessionId === session.id ? (
           <ConfirmBox
             title="회차 삭제"

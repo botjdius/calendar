@@ -136,7 +136,6 @@
       formatWeekly,
       isClosureActive,
       isPublicClosure,
-      isSyntheticHolidayHold,
       normalizeTime,
       nid,
       paymentBadge,
@@ -548,12 +547,11 @@
         ${closuresCard()}
         ${sessions.map((s) => {
           const holiday = s.status === 'cancelled';
-          const syntheticHold = isSyntheticHolidayHold(s);
           const pays = holiday ? [] : paymentBoxesForSession(st, s);
           return `<div class="card">
             <b>${s.cycle}회</b> <span class="pill ${holiday ? 'wine' : 'clay'}">${sessionLabel(s)}</span>
             <p><b>${timeLabel(s.date)} ${formatTime12(s.time)}</b></p>
-            ${holiday && !syntheticHold ? `<p class="wine"><b>다음 주에 ${s.cycle}회가 다시 시작합니다. 출석·보강 신청은 없습니다.</b></p>` : `
+            ${holiday ? `<p class="wine"><b>다음 주에 ${s.cycle}회가 다시 시작합니다. 출석·보강 신청은 없습니다.</b></p>` : `
             ${pays.map((p) => `<p class="${p.paid ? '' : 'wine'}"><b>${p.paid ? `결제 ${p.paidAt ? timeLabel(p.paidAt) : ''}` : '미결제'}</b></p>`).join('')}
             <p>${s.note ? `수업 내용: ${s.note}` : '수업 내용이 아직 없습니다.'}</p>
             ${(() => {
