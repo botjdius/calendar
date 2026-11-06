@@ -508,6 +508,18 @@ export function announcementsForStudent<T extends { studentIds?: string[]; creat
   });
 }
 
+/** Instructor inbox: same expiry rule as 레슨생 (hide after 표시 종료일 passes). */
+export function announcementsForInstructor<
+  T extends { createdAt?: string; expiresOn?: string; deletedAt?: string },
+>(announcements: T[] | undefined, onDate?: string): T[] {
+  return (announcements || []).filter((item) => {
+    if (item.deletedAt) return false;
+    if (!onDate) return true;
+    const expiresOn = String(item.expiresOn || item.createdAt || '').slice(0, 10);
+    return !expiresOn || expiresOn >= onDate;
+  });
+}
+
 export function dropStudentsMissingFrom(current: Student[] | undefined, incoming: Student[] | undefined): Student[] {
   const liveIds = new Set((incoming || []).map((student) => student.id).filter(Boolean));
   if (!liveIds.size) return current || [];

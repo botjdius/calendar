@@ -1,4 +1,4 @@
-import { announcementsForStudent, mergeAnnouncements, mergeStudio } from '../server/cloud.mjs';
+import { announcementsForStudent, announcementsForInstructor, mergeAnnouncements, mergeStudio } from '../server/cloud.mjs';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -63,6 +63,11 @@ assert(staleMerge[0].deletedAt === deleted.deletedAt, 'a stale device cannot res
 assert(
   announcementsForStudent(staleMerge, 'student-a', '2026-09-30').length === 0,
   'deleted announcement immediately disappears from the student app'
+);
+
+assert(
+  announcementsForInstructor([first, second], '2026-10-01').map((item) => item.id).join(',') === first.id,
+  'instructor sees the same date window as students (expired notices hidden)'
 );
 
 console.log('ok announcements persist and filter by recipient');

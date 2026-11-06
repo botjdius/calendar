@@ -101,7 +101,13 @@ export function isHolidaySession(session: Pick<LessonSession, 'status'>) {
   return session.status === 'cancelled';
 }
 
+/** Synthetic holds from school-wide closures use ids like `holiday:…` (see holidayHoldId). */
+export function isSyntheticHolidayHold(session: Pick<LessonSession, 'status' | 'id'>) {
+  return isHolidaySession(session) && String(session.id || '').startsWith('holiday:');
+}
+
 export function sessionLabel(session: LessonSession) {
+  if (isSyntheticHolidayHold(session)) return '휴강';
   if (isHolidaySession(session)) return '휴강으로 다음주로 이동';
   if (session.makeup?.status === 'done') return '보강 출석 (대체)';
   if (session.makeup?.status === 'absent') return '보강 불참';
@@ -496,24 +502,33 @@ export function generatePack(opts: {
   fromDate: string;
   count?: number;
   exactFirst?: boolean;
+  closures?: Closure[];
 }): LessonSession[] {
   const count = opts.count ?? 4;
   const weekday = ((opts.weekday % 7) + 7) % 7;
   const time = normalizeTime(opts.time);
+  const closures = opts.closures;
   const seed = opts.fromDate || todayIso();
   const first = opts.exactFirst ? seed : nextOnWeekday(seed, weekday);
-  return Array.from({ length: count }, (_, i) => ({
-    id: nid(),
-    cycle: wrapCycle(opts.startCycle + i),
-    pack: opts.pack,
-    status: 'pending' as const,
-    date: addDays(first, i * 7),
-    time,
-    makeup: null,
-    note: '',
-    studentNote: '',
-    attachments: [],
-  }));
+  let cursor = first;
+  const sessions: LessonSession[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const date = i === 0 ? skipClosures(cursor, time, closures) : weekAfterLatest(cursor, time, closures);
+    cursor = date;
+    sessions.push({
+      id: nid(),
+      cycle: wrapCycle(opts.startCycle + i),
+      pack: opts.pack,
+      status: 'pending' as const,
+      date,
+      time,
+      makeup: null,
+      note: '',
+      studentNote: '',
+      attachments: [],
+    });
+  }
+  return sessions;
 }
 
 export function dateHitsClosure(iso: string, time: string, closures: Closure[] | undefined) {
@@ -605,6 +620,14 @@ export function applyClosuresToSessions(
     });
   };
 
+  const floorDate = (() => {
+    const candidates = ordered
+      .filter((session) => !isLockedSession(session))
+      .map((session) => session.date)
+      .filter(Boolean) as string[];
+    return candidates.length ? [...candidates].sort()[0] : '';
+  })();
+
   for (const session of ordered) {
     if (isLockedSession(session)) {
       if (session.date) placed.set(session.id, session.date);
@@ -638,6 +661,7 @@ export function applyClosuresToSessions(
   }
 
   for (const day of lessonDaysInClosures(closures, lessonWeekday, time)) {
+    if (floorDate && day < floorDate) continue;
     if (ordered.some((session) => isLockedSession(session) && session.date === day)) continue;
     if (extras.some((hold) => hold.date === day)) continue;
     const after = skipClosures(addDays(day, 7), time, closures);
@@ -653,6 +677,13 @@ export function applyClosuresToSessions(
     else if (prev) addHold(wrapCycle(prev.cycle + 1), prev.pack ?? 0, day, prev.time || time);
   }
 
+  const carryHolds = (sessions || []).filter(
+    (s) =>
+      s.status === 'cancelled' &&
+      String(s.id || '').startsWith('holiday:') &&
+      Boolean(s.date) &&
+      dateHitsClosure(s.date, s.time || time, closures)
+  );
   return dedupeHolidaySessions([
     ...reals.map((session) => {
       const date = placed.get(session.id);
@@ -660,6 +691,7 @@ export function applyClosuresToSessions(
       return { ...session, date, originalDate: undefined };
     }),
     ...extras,
+    ...carryHolds,
   ]);
 }
 

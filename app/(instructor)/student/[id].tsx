@@ -14,7 +14,9 @@ import {
   formatTime12,
   inferContinuingPack,
   isHolidaySession,
+  isSyntheticHolidayHold,
   isLockedSession,
+  isClosureActive,
   isPublicClosure,
   lastRealSession,
   paymentBadge,
@@ -133,11 +135,12 @@ export default function StudentDetail() {
     );
   }
 
-  const st = sessionStats(student);
+  const lessonCard = student;
+  const st = sessionStats(lessonCard);
   const today = todayIso();
-  const { upcoming, past } = splitSessionsAroundToday(student.sessions, today);
-  const badge = PaymentPillLabel(paymentBadge(student));
-  const packChoices = continuingPackOptions(student.sessions);
+  const { upcoming, past } = splitSessionsAroundToday(lessonCard.sessions, today);
+  const badge = PaymentPillLabel(paymentBadge(lessonCard));
+  const packChoices = continuingPackOptions(lessonCard.sessions);
 
   function commitSetup(patch: { weekday?: number; time?: string; startCycle?: CycleIndex; firstDate?: string }) {
     const nextWeekday = patch.weekday ?? weekday;
@@ -148,7 +151,7 @@ export default function StudentDetail() {
     if (patch.time !== undefined) setTime(patch.time);
     if (patch.startCycle !== undefined) setStartCycle(patch.startCycle);
     if (patch.firstDate !== undefined) setFirstDate(patch.firstDate);
-    applyLessonSetup(student!.id, {
+    applyLessonSetup(lessonCard.id, {
       weekday: nextWeekday,
       time: nextTime,
       startCycle: nextCycle,
@@ -162,7 +165,7 @@ export default function StudentDetail() {
     if (session.makeup.status === 'absent') return ' · 불참';
     const accepted = requests.some(
       (r) =>
-        r.studentId === student.id &&
+        r.studentId === lessonCard.id &&
         r.sessionId === session.id &&
         r.status === 'accepted' &&
         r.date === session.makeup?.date &&
@@ -228,16 +231,16 @@ export default function StudentDetail() {
             </>
           )}
         </View>
-        {holiday ? (
+        {holiday && !isSyntheticHolidayHold(session) ? (
           <Text style={{ color: colors.wine, marginTop: 8, fontWeight: '800' }}>
             다음 주에 {session.cycle}회가 다시 시작합니다.
           </Text>
-        ) : (
+        ) : !holiday ? (
           <>
             <PaymentBox
-              student={student}
+              student={lessonCard}
               session={session}
-              onToggle={(pack, paid, paidAt, sessionId) => setPackPayment(student.id, pack, paid, paidAt, sessionId)}
+              onToggle={(pack, paid, paidAt, sessionId) => setPackPayment(lessonCard.id, pack, paid, paidAt, sessionId)}
             />
             {lessonOpen ? (
               <>
@@ -245,14 +248,14 @@ export default function StudentDetail() {
                   defaultOpen
                   label="레슨 날짜"
                   value={session.date}
-                  onChange={(iso) => setSessionDate(student.id, session.id, iso)}
+                  onChange={(iso) => setSessionDate(lessonCard.id, session.id, iso)}
                 />
                 <TimeField
                   label="레슨 시간"
                   value={sessionTimes[session.id] ?? session.time}
                   onChange={(t) => {
                     setSessionTimes((p) => ({ ...p, [session.id]: t }));
-                    setSessionTime(student.id, session.id, t);
+                    setSessionTime(lessonCard.id, session.id, t);
                   }}
                 />
               </>
@@ -278,7 +281,7 @@ export default function StudentDetail() {
                     const t = makeupTime[session.id] || session.makeup?.time || session.time;
                     if (!date) return;
                     void saveFeedback.run(makeupKey, () =>
-                      setMakeup(student.id, session.id, { date, time: t, status: 'planned' })
+                      setMakeup(lessonCard.id, session.id, { date, time: t, status: 'planned' })
                     );
                   }}
                 />
@@ -288,7 +291,7 @@ export default function StudentDetail() {
                     label={saveFeedback.buttonLabel(`${makeupKey}:clear`, '보강 취소')}
                     disabled={saveFeedback.busy(`${makeupKey}:clear`)}
                     onPress={() =>
-                      void saveFeedback.run(`${makeupKey}:clear`, () => setMakeup(student.id, session.id, null))
+                      void saveFeedback.run(`${makeupKey}:clear`, () => setMakeup(lessonCard.id, session.id, null))
                     }
                   />
                 ) : null}
@@ -302,7 +305,7 @@ export default function StudentDetail() {
                   disabled={saveFeedback.busy(statusKey('attended'))}
                   onPress={() =>
                     void saveFeedback.run(statusKey('attended'), () =>
-                      setSessionStatus(student.id, session.id, 'attended')
+                      setSessionStatus(lessonCard.id, session.id, 'attended')
                     )
                   }
                 />
@@ -314,7 +317,7 @@ export default function StudentDetail() {
                   disabled={saveFeedback.busy(statusKey('absent'))}
                   onPress={() =>
                     void saveFeedback.run(statusKey('absent'), () =>
-                      setSessionStatus(student.id, session.id, 'absent')
+                      setSessionStatus(lessonCard.id, session.id, 'absent')
                     )
                   }
                 />
@@ -326,7 +329,7 @@ export default function StudentDetail() {
               disabled={saveFeedback.busy(statusKey('pending'))}
               onPress={() =>
                 void saveFeedback.run(statusKey('pending'), () =>
-                  setSessionStatus(student.id, session.id, 'pending')
+                  setSessionStatus(lessonCard.id, session.id, 'pending')
                 )
               }
             />
@@ -349,7 +352,7 @@ export default function StudentDetail() {
               onPress={() =>
                 void saveFeedback.run(noteKey, async () => {
                   const text = notes[session.id] ?? session.note;
-                  await setInstructorNote(student.id, session.id, text);
+                  await setInstructorNote(lessonCard.id, session.id, text);
                   setNotes((p) => {
                     if (p[session.id] === undefined) return p;
                     const next = { ...p };
@@ -384,7 +387,7 @@ export default function StudentDetail() {
                 <Pressable
                   onPress={async () => {
                     try {
-                      await removeSessionFile(student.id, session.id, f.id);
+                      await removeSessionFile(lessonCard.id, session.id, f.id);
                       setFileError((prev) => ({ ...prev, [session.id]: '' }));
                     } catch (err) {
                       setFileError((prev) => ({
@@ -402,7 +405,7 @@ export default function StudentDetail() {
               hubBase={hubUrl || null}
               onFile={async (file) => {
                 try {
-                  await addSessionFile(student.id, session.id, file);
+                  await addSessionFile(lessonCard.id, session.id, file);
                   setFileError((prev) => ({ ...prev, [session.id]: '' }));
                 } catch (err) {
                   setFileError((prev) => ({
@@ -416,7 +419,7 @@ export default function StudentDetail() {
             />
             <FileAttachError message={fileError[session.id] || ''} />
           </>
-        )}
+        ) : null}
         {askRemoveSessionId === session.id ? (
           <ConfirmBox
             title="회차 삭제"
@@ -437,7 +440,7 @@ export default function StudentDetail() {
               setRemovingSessionId(session.id);
               setSessionRemoveError((prev) => ({ ...prev, [session.id]: '' }));
               try {
-                await removeSession(student.id, session.id);
+                await removeSession(lessonCard.id, session.id);
                 setAskRemoveSessionId('');
               } catch (error) {
                 setSessionRemoveError((prev) => ({
@@ -453,7 +456,7 @@ export default function StudentDetail() {
         ) : (
           <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 8 }}>
             <View style={{ flex: 1 }}>
-              <Button tone="ghost" label="회차 추가" onPress={() => addSession(student.id, session.id)} />
+              <Button tone="ghost" label="회차 추가" onPress={() => addSession(lessonCard.id, session.id)} />
             </View>
             <View style={{ flex: 1 }}>
               <Button
@@ -474,18 +477,18 @@ export default function StudentDetail() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
-        <Screen title={student.name} subtitle="회차는 1~4로 돌고, 각 회차를 추가·삭제할 수 있습니다.">
+        <Screen title={lessonCard.name} subtitle="회차는 1~4로 돌고, 각 회차를 추가·삭제할 수 있습니다.">
           <Button tone="ghost" label="목록으로" onPress={goList} />
-          <MonthlyGoalsSection student={student} />
+          <MonthlyGoalsSection student={lessonCard} />
           <Card>
             <Fold title="가입코드">
             <Text selectable style={{ fontSize: 28, fontWeight: '800', color: colors.clay, letterSpacing: 2 }}>
-              {student.joinCode || '없음'}
+              {lessonCard.joinCode || '없음'}
             </Text>
             <Text style={{ color: colors.muted, marginTop: 8, lineHeight: 22 }}>
               카톡으로 입장 링크를 보내면 레슨생이 이름만 확인하고 들어옵니다. 맥이나 같은 와이파이가 없어도 됩니다.
             </Text>
-            {student.joinCode ? (
+            {lessonCard.joinCode ? (
               <>
                 <Button
                   label={copiedLink ? '복사됨' : shareLink ? '입장 링크 복사' : '공개 링크 준비 중'}
@@ -506,7 +509,7 @@ export default function StudentDetail() {
                   label={copiedCode ? '복사됨' : '가입코드만 복사'}
                   tone="ghost"
                   onPress={async () => {
-                    await Clipboard.setStringAsync(student.joinCode);
+                    await Clipboard.setStringAsync(lessonCard.joinCode);
                     setCopiedCode(true);
                     setTimeout(() => setCopiedCode(false), 1600);
                   }}
@@ -545,7 +548,7 @@ export default function StudentDetail() {
               value={time}
               onChange={(t) => {
                 setTime(t);
-                setFixedTime(student.id, t);
+                setFixedTime(lessonCard.id, t);
               }}
             />
             <Text style={{ color: colors.muted, marginBottom: 12 }}>
@@ -581,7 +584,7 @@ export default function StudentDetail() {
               label="이 요일·시간으로 4회 자동 등록"
               tone="clay"
               onPress={() =>
-                applyFixedSchedule(student.id, {
+                applyFixedSchedule(lessonCard.id, {
                   weekday,
                   time,
                   startCycle,
@@ -592,10 +595,10 @@ export default function StudentDetail() {
             </Fold>
           </Card>
 
-          {closures.filter(isPublicClosure).length > 0 ? (
+          {closures.filter((c) => isPublicClosure(c) && isClosureActive(c)).length > 0 ? (
             <Card>
               <Text style={{ fontWeight: '800', color: colors.wine, marginBottom: 6 }}>전체 휴강</Text>
-              {closures.filter(isPublicClosure).map((c) => (
+              {closures.filter((c) => isPublicClosure(c) && isClosureActive(c)).map((c) => (
                 <Text key={c.id} style={{ color: colors.wine, fontWeight: '700', marginTop: 6 }}>
                   {closureLabel(c)}
                 </Text>
@@ -654,9 +657,9 @@ export default function StudentDetail() {
               ))}
             </View>
             <Button
-              label={student.sessions.length ? `맨 뒤에 ${addCycle}회 추가` : `첫 회차 ${addCycle}회로 추가`}
+              label={lessonCard.sessions.length ? `맨 뒤에 ${addCycle}회 추가` : `첫 회차 ${addCycle}회로 추가`}
               tone="clay"
-              onPress={() => addSession(student.id, undefined, addCycle, addPack)}
+              onPress={() => addSession(lessonCard.id, undefined, addCycle, addPack)}
             />
             </Fold>
           </Card>

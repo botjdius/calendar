@@ -20,6 +20,8 @@ import {
   retargetFollowing,
   sessionCoveredByClosure,
   studentsAffectedByClosure,
+  isSyntheticHolidayHold,
+  sessionLabel,
   closureWhenLabel,
   formatTime12,
   makeupRequestBlockReason,
@@ -740,6 +742,52 @@ const added = insertSessionAfter(makeupStudent.sessions, 'b', { time: '14:00', w
 assert.deepEqual(
   added.filter((s) => s.status !== 'cancelled').map((s) => s.cycle),
   [1, 2, 3, 4, 1]
+);
+
+assert.equal(isSyntheticHolidayHold({ id: 'holiday:2026-09-16:14:00', status: 'cancelled' }), true);
+assert.equal(
+  sessionLabel({ id: 'holiday:2026-09-16:14:00', status: 'cancelled', date: '2026-09-16', time: '14:00' }),
+  '휴강'
+);
+
+const closureOnFirstLesson = {
+  id: 'same-day',
+  date: '2026-09-16',
+  endDate: '2026-09-16',
+  time: '',
+  reason: '',
+  scope: 'all',
+};
+const emptyForClosure = applyLessonSetup(
+  { id: 'new', name: 'ㄴ', weekday: 3, time: '14:00', startCycle: 1, sessions: [] },
+  { weekday: 3, time: '14:00', startCycle: 1, firstDate: '2026-09-16' },
+  [closureOnFirstLesson]
+);
+assert.equal(emptyForClosure.sessions[0].date, '2026-09-23');
+
+const closureBeforeLessons = {
+  id: 'early-wed',
+  date: '2026-09-02',
+  endDate: '2026-09-02',
+  time: '',
+  reason: '',
+  scope: 'all',
+};
+const withEarlyClosure = applyHoliday(
+  [
+    {
+      id: 'st-early',
+      name: 'ㄷ',
+      weekday: 3,
+      time: '14:00',
+      sessions: [{ ...sess('only', '2026-09-16'), cycle: 1 }],
+    },
+  ],
+  closureBeforeLessons
+)[0];
+assert.ok(
+  !withEarlyClosure.sessions.some((s) => s.status === 'cancelled' && s.date === '2026-09-02'),
+  'no synthetic holiday hold before the first scheduled lesson'
 );
 
 console.log('schedule tests ok');

@@ -21,15 +21,26 @@ export function MonthCal({
   selected,
   onSelect,
   editable,
+  cursorMonth,
+  onCursorMonthChange,
 }: {
   marks?: Record<string, CalMark[]>;
   selected?: string;
   onSelect?: (iso: string) => void;
   editable?: boolean;
+  /** When set, the grid shows this year/month (controlled). Omit for internal cursor state. */
+  cursorMonth?: { y: number; m: number };
+  onCursorMonthChange?: (next: { y: number; m: number }) => void;
 }) {
   const today = toIso(new Date());
   const seed = selected ? parseIso(selected) : new Date();
-  const [cursor, setCursor] = useState({ y: seed.getFullYear(), m: seed.getMonth() });
+  const [uncontrolledCursor, setUncontrolledCursor] = useState({ y: seed.getFullYear(), m: seed.getMonth() });
+  const cursor = cursorMonth ?? uncontrolledCursor;
+  const setCursor = (fn: (c: { y: number; m: number }) => { y: number; m: number }) => {
+    const next = fn(cursor);
+    if (onCursorMonthChange) onCursorMonthChange(next);
+    else setUncontrolledCursor(next);
+  };
   const days = useMemo(() => monthGrid(cursor.y, cursor.m), [cursor]);
 
   return (

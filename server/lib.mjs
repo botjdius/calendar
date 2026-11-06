@@ -498,6 +498,14 @@ export function applyClosuresToSessions(sessions, time, closures, weekday) {
     });
   };
 
+  const floorDate = (() => {
+    const candidates = ordered
+      .filter((session) => !isLockedSession(session))
+      .map((session) => session.date)
+      .filter(Boolean);
+    return candidates.length ? [...candidates].sort()[0] : '';
+  })();
+
   for (const session of ordered) {
     if (isLockedSession(session)) {
       if (session.date) placed.set(session.id, session.date);
@@ -531,6 +539,7 @@ export function applyClosuresToSessions(sessions, time, closures, weekday) {
   }
 
   for (const day of lessonDaysInClosures(closures, lessonWeekday, time)) {
+    if (floorDate && day < floorDate) continue;
     if (ordered.some((session) => isLockedSession(session) && session.date === day)) continue;
     if (extras.some((hold) => hold.date === day)) continue;
     const after = skipClosures(addDays(day, 7), time, closures);
@@ -546,6 +555,13 @@ export function applyClosuresToSessions(sessions, time, closures, weekday) {
     else if (prev) addHold(wrapCycle(prev.cycle + 1), prev.pack ?? 0, day, prev.time || time);
   }
 
+  const carryHolds = (sessions || []).filter(
+    (s) =>
+      s.status === 'cancelled' &&
+      String(s.id || '').startsWith('holiday:') &&
+      s.date &&
+      dateHitsClosure(s.date, s.time || time, closures)
+  );
   return dedupeHolidaySessions([
     ...reals.map((session) => {
       const date = placed.get(session.id);
@@ -553,6 +569,7 @@ export function applyClosuresToSessions(sessions, time, closures, weekday) {
       return { ...session, date, originalDate: undefined };
     }),
     ...extras,
+    ...carryHolds,
   ]);
 }
 
@@ -673,13 +690,16 @@ export function applyLessonSetup(student, opts, closures = []) {
   if (!locked.length && !unlocked.length) count = 4;
   if (count < 1) count = 0;
   const planned = [];
+  let cursor = first;
   for (let i = 0; i < count; i += 1) {
+    const date = i === 0 ? skipClosures(cursor, time, closures) : weekAfterLatest(cursor, time, closures);
+    cursor = date;
     planned.push({
       id: nid(),
       cycle: wrapCycle(startCycle + i),
       pack: 0,
       status: 'pending',
-      date: addDays(first, i * 7),
+      date,
       time,
       makeup: null,
       note: '',
@@ -781,7 +801,12 @@ export function isHolidaySession(session) {
   return session.status === 'cancelled';
 }
 
+export function isSyntheticHolidayHold(session) {
+  return isHolidaySession(session) && String(session.id || '').startsWith('holiday:');
+}
+
 export function sessionLabel(session) {
+  if (isSyntheticHolidayHold(session)) return '휴강';
   if (session.status === 'cancelled') return '휴강으로 다음주로 이동';
   if (session.makeup?.status === 'done') return '보강 출석 (대체)';
   if (session.makeup?.status === 'absent') return '보강 불참';

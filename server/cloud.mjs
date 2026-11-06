@@ -424,6 +424,15 @@ export function announcementsForStudent(announcements, studentId, onDate) {
   });
 }
 
+export function announcementsForInstructor(announcements, onDate) {
+  return (announcements || []).filter((item) => {
+    if (item.deletedAt) return false;
+    if (!onDate) return true;
+    const expiresOn = String(item.expiresOn || item.createdAt || '').slice(0, 10);
+    return !expiresOn || expiresOn >= onDate;
+  });
+}
+
 export function dropStudentsMissingFrom(current, incoming) {
   const liveIds = new Set((incoming || []).map((student) => student.id).filter(Boolean));
   if (!liveIds.size) return current || [];

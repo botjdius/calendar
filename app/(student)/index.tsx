@@ -13,6 +13,7 @@ import {
   isClosureActive,
   isHolidaySession,
   isPublicClosure,
+  isSyntheticHolidayHold,
   makeupRequestLocked,
   paymentBadge,
   paymentBoxesForSession,
@@ -113,11 +114,11 @@ export default function StudentHome() {
         <Text style={{ marginTop: 6, fontWeight: '700' }}>
           {isHolidaySession(session) ? '휴강' : '레슨'} {timeLabel(session.date)} {formatTime12(session.time)}
         </Text>
-        {isHolidaySession(session) ? (
+        {isHolidaySession(session) && !isSyntheticHolidayHold(session) ? (
           <Text style={{ color: colors.wine, marginTop: 8, fontWeight: '800' }}>
             다음 주에 {session.cycle}회가 다시 시작합니다.
           </Text>
-        ) : (
+        ) : !isHolidaySession(session) ? (
           <>
             {paymentBoxesForSession(student, session).map((p) => (
               <Text
@@ -220,7 +221,7 @@ export default function StudentHome() {
               );
             })()}
           </>
-        )}
+        ) : null}
       </Card>
     );
   }

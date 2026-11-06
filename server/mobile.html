@@ -134,7 +134,9 @@
       eachDay,
       formatTime12,
       formatWeekly,
+      isClosureActive,
       isPublicClosure,
+      isSyntheticHolidayHold,
       normalizeTime,
       nid,
       paymentBadge,
@@ -360,6 +362,10 @@
       return (view?.closures || []).filter(isPublicClosure);
     }
 
+    function activePublicClosures() {
+      return publicClosures().filter((c) => isClosureActive(c));
+    }
+
     function copy(text) {
       navigator.clipboard?.writeText(text).catch(() => {});
     }
@@ -514,7 +520,7 @@
     }
 
     function closuresCard() {
-      const list = publicClosures();
+      const list = activePublicClosures();
       if (!list.length) return `<div class="card"><b class="wine">전체 휴강</b><p class="muted">등록된 휴강이 없습니다.</p></div>`;
       return `<div class="card"><b class="wine">전체 휴강</b>${list.map((c) => `<p class="wine"><b>${closureLabel(c)}</b></p>`).join('')}</div>`;
     }
@@ -542,11 +548,12 @@
         ${closuresCard()}
         ${sessions.map((s) => {
           const holiday = s.status === 'cancelled';
+          const syntheticHold = isSyntheticHolidayHold(s);
           const pays = holiday ? [] : paymentBoxesForSession(st, s);
           return `<div class="card">
-            <b>${s.cycle}회</b> <span class="pill ${holiday ? 'wine' : 'clay'}">${holiday ? '휴강으로 다음주로 이동' : sessionLabel(s)}</span>
+            <b>${s.cycle}회</b> <span class="pill ${holiday ? 'wine' : 'clay'}">${sessionLabel(s)}</span>
             <p><b>${timeLabel(s.date)} ${formatTime12(s.time)}</b></p>
-            ${holiday ? `<p class="wine"><b>다음 주에 ${s.cycle}회가 다시 시작합니다. 출석·보강 신청은 없습니다.</b></p>` : `
+            ${holiday && !syntheticHold ? `<p class="wine"><b>다음 주에 ${s.cycle}회가 다시 시작합니다. 출석·보강 신청은 없습니다.</b></p>` : `
             ${pays.map((p) => `<p class="${p.paid ? '' : 'wine'}"><b>${p.paid ? `결제 ${p.paidAt ? timeLabel(p.paidAt) : ''}` : '미결제'}</b></p>`).join('')}
             <p>${s.note ? `수업 내용: ${s.note}` : '수업 내용이 아직 없습니다.'}</p>
             ${(() => {
@@ -616,7 +623,12 @@
         return true;
       }).sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
       const slotDays = new Set(slots.map((s) => s.date));
-      publicClosures().forEach((c) => eachDay(c.date, closureEnd(c)).forEach((iso) => marks.add(iso)));
+      activePublicClosures().forEach((c) =>
+        eachDay(c.date, closureEnd(c)).forEach((iso) => {
+          const d = new Date(`${iso}T12:00:00`);
+          if (d.getFullYear() === y && d.getMonth() === m) marks.add(iso);
+        })
+      );
       const days = Array.from({ length: 42 }, (_, i) => {
         const d = new Date(start);
         d.setDate(start.getDate() + i);

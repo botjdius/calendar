@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { DateField, MonthCal, TimeField, timeLabel, type CalMark } from './MonthCal';
 import { instructorMakeupEntries } from './makeup';
-import { addDays, closureCovers, closureEnd, eachDay, formatTime12, isClosureActive, isPublicClosure, sessionsForMakeupSlot, slotsForStudentMakeup, todayIso, WEEKDAYS } from './schedule';
+import { addDays, closureCovers, closureEnd, eachDay, formatTime12, isClosureActive, isPublicClosure, parseIso, sessionsForMakeupSlot, slotsForStudentMakeup, todayIso, WEEKDAYS } from './schedule';
 import { colors } from './theme';
 import type { Closure, MakeupRequest, OpenSlot, Student } from './types';
 import { isActiveMakeup, studentRequestLabel } from './makeup';
@@ -44,6 +44,8 @@ export function PublicCalendar({
   onDecideMakeup?: (requestId: string, accepted: boolean) => Promise<void>;
   onOpenStudent?: (studentId: string) => void;
 }) {
+  const now = new Date();
+  const [calMonth, setCalMonth] = useState({ y: now.getFullYear(), m: now.getMonth() });
   const [selected, setSelected] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -85,12 +87,15 @@ export function PublicCalendar({
       map[iso] = [...(map[iso] ?? []), k];
     };
     closures.filter(isPublicClosure).forEach((c) => {
-      eachDay(c.date, closureEnd(c)).forEach((iso) => add(iso, 'closure'));
+      eachDay(c.date, closureEnd(c)).forEach((iso) => {
+        const d = parseIso(iso);
+        if (d.getFullYear() === calMonth.y && d.getMonth() === calMonth.m) add(iso, 'closure');
+      });
     });
     visibleSlots.forEach((s) => add(s.date, 'slot'));
     makeupDays.forEach((row) => add(row.date, 'makeup'));
     return map;
-  }, [closures, visibleSlots, makeupDays]);
+  }, [closures, visibleSlots, makeupDays, calMonth]);
 
   const publicClosures = closures.filter(isPublicClosure);
   const closureNotices = publicClosures.filter((closure) => isClosureActive(closure));
@@ -213,7 +218,7 @@ export function PublicCalendar({
   return (
     <Screen
       title="한달 달력"
-      subtitle={instructor ? '휴강과 빈 시간을 등록하면 모든 레슨생에게 보입니다.' : '내 레슨일 기준 앞뒤 1주(3주 안)의 보강 시간만 보입니다. 레슨 3일 전부터는 신청할 수 없습니다.'}
+      subtitle={instructor ? '휴강과 빈 시간을 등록하면 모든 레슨생에게 보입니다.' : '달력 월을 넘기면 예정 휴강 전체가 표시됩니다. 보강 시간은 내 레슨일 기준 앞뒤 1주(3주 안)만 보이고, 레슨 3일 전부터는 신청할 수 없습니다.'}
     >
       {instructor && onDecideMakeup && requests.length > 0 ? (
         <MakeupReview requests={requests} onDecide={onDecideMakeup} onOpenStudent={onOpenStudent} />
@@ -269,7 +274,14 @@ export function PublicCalendar({
 
       {view === 'month' ? (
         <Card>
-          <MonthCal marks={marks} selected={selected} onSelect={instructor ? pickDay : setSelected} editable={instructor} />
+          <MonthCal
+            marks={marks}
+            selected={selected}
+            onSelect={instructor ? pickDay : setSelected}
+            editable={instructor}
+            cursorMonth={calMonth}
+            onCursorMonthChange={setCalMonth}
+          />
         </Card>
       ) : (
         weekDays.map((row) => (

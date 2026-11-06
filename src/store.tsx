@@ -28,6 +28,7 @@ import {
 } from 'react';
 import {
   announcementsForStudent,
+  announcementsForInstructor,
   applyStudentWrite,
   dropStudentsMissingFrom,
   fetchCloud,
@@ -268,7 +269,8 @@ function blankStudent(
   weekday = 3,
   time = '14:00',
   startCycle: CycleIndex = 1,
-  firstDate?: string
+  firstDate?: string,
+  closures: Closure[] = []
 ): Student {
   const first = nextOnWeekday(firstDate || todayIso(), weekday);
   const sessions = generatePack({
@@ -278,6 +280,7 @@ function blankStudent(
     time,
     fromDate: first,
     exactFirst: true,
+    closures,
   });
   return {
     id,
@@ -1394,7 +1397,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const visibleRequests = user?.role === 'instructor' || myStudent ? requests : [];
   const visibleAnnouncements =
     user?.role === 'instructor'
-      ? announcements.filter((item) => !item.deletedAt)
+      ? announcementsForInstructor(announcements, todayIso())
       : myStudent
         ? announcementsForStudent(announcements, myStudent.id, todayIso())
         : [];
@@ -1842,21 +1845,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
     async addStudent(input) {
       requireInstructor();
+      const holidays = await currentClosures();
       const student = blankStudent(
         nid(),
         input.name,
         input.weekday,
         normalizeTime(input.time),
         input.startCycle,
-        input.firstDate
+        input.firstDate,
+        holidays
       );
+      const sessionsReady = postponeOverlaps(student.sessions, student.time, holidays, student.weekday);
       if (firebaseOn) {
-        await setDoc(doc(db!, 'students', student.id), student);
+        await setDoc(doc(db!, 'students', student.id), { ...student, sessions: sessionsReady });
         await setDoc(doc(db!, 'joinCodes', student.joinCode), {
           studentId: student.id,
           name: student.name,
         });
-        return student;
+        return { ...student, sessions: sessionsReady };
       }
       const shared = await currentShared();
       const cloud = isCloudConfigured ? await fetchCloud() : null;
@@ -1866,7 +1872,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           mergeStudents(shared.students, cloud?.students || [], true),
           mergeRemovedStudents(shared.removedStudents, cloud?.removedStudents)
         ),
-        sessions: postponeOverlaps(student.sessions, student.time, shared.closures, student.weekday),
+        sessions: postponeOverlaps(sessionsReady, student.time, shared.closures, student.weekday),
       };
       await persistShared({ students: [...shared.students.map(normalizeStudent), ready] });
       return ready;
