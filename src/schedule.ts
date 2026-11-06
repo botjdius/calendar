@@ -107,7 +107,7 @@ export function isSyntheticHolidayHold(session: Pick<LessonSession, 'status' | '
 }
 
 export function sessionLabel(session: LessonSession) {
-  if (isSyntheticHolidayHold(session)) return '휴강';
+  if (isSyntheticHolidayHold(session)) return '휴강으로 인해 다음주로 대체';
   if (isHolidaySession(session)) return '휴강으로 다음주로 이동';
   if (session.makeup?.status === 'done') return '보강 출석 (대체)';
   if (session.makeup?.status === 'absent') return '보강 불참';
@@ -285,6 +285,21 @@ export function isArchivedLesson(session: LessonSession, today = todayIso()) {
   return Boolean(date) && date < today;
 }
 
+/** Keep a synthetic holiday hold in "upcoming" until its deferred lesson (same 회차) is no longer upcoming. */
+function syntheticHoldStaysUpcoming(sessions: LessonSession[], hold: LessonSession, today: string) {
+  if (!isSyntheticHolidayHold(hold) || !hold.date) return false;
+  if (!(hold.date < today)) return false;
+  const pack = hold.pack ?? 0;
+  const cycle = hold.cycle;
+  return (sessions || []).some(
+    (session) =>
+      session.status !== 'cancelled' &&
+      session.cycle === cycle &&
+      (session.pack ?? 0) === pack &&
+      !isArchivedLesson(session, today)
+  );
+}
+
 export function splitSessionsAroundToday(sessions: LessonSession[], today = todayIso()) {
   const byDisplay = (a: LessonSession, b: LessonSession, newestFirst: boolean) => {
     const dateCmp = newestFirst
@@ -301,10 +316,16 @@ export function splitSessionsAroundToday(sessions: LessonSession[], today = toda
     return (a.pack ?? 0) - (b.pack ?? 0) || a.cycle - b.cycle;
   };
   const upcoming = [...sessions]
-    .filter((session) => !isArchivedLesson(session, today))
+    .filter(
+      (session) =>
+        !isArchivedLesson(session, today) || syntheticHoldStaysUpcoming(sessions, session, today)
+    )
     .sort((a, b) => byDisplay(a, b, false));
   const past = [...sessions]
-    .filter((session) => isArchivedLesson(session, today))
+    .filter(
+      (session) =>
+        isArchivedLesson(session, today) && !syntheticHoldStaysUpcoming(sessions, session, today)
+    )
     .sort((a, b) => byDisplay(a, b, true));
   return { upcoming, past };
 }

@@ -204,7 +204,9 @@ export default function StudentDetail() {
             }}
           >
             <Text style={{ fontWeight: '700' }}>
-              {holiday ? '휴강' : '레슨'} {timeLabel(session.date)} {formatTime12(session.time)}
+              {isSyntheticHolidayHold(session)
+                ? `해당 주 ${timeLabel(session.date)} ${formatTime12(session.time)}`
+                : `${holiday ? '휴강' : '레슨'} ${timeLabel(session.date)} ${formatTime12(session.time)}`}
             </Text>
           </Pressable>
           {holiday ? null : (
@@ -231,7 +233,11 @@ export default function StudentDetail() {
             </>
           )}
         </View>
-        {holiday && !isSyntheticHolidayHold(session) ? (
+        {holiday && isSyntheticHolidayHold(session) ? (
+          <Text style={{ color: colors.wine, marginTop: 8, fontWeight: '800' }}>
+            휴강으로 다음주로 이동 · 다음 주에 {session.cycle}회가 다시 시작합니다.
+          </Text>
+        ) : holiday ? (
           <Text style={{ color: colors.wine, marginTop: 8, fontWeight: '800' }}>
             다음 주에 {session.cycle}회가 다시 시작합니다.
           </Text>

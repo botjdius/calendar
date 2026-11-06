@@ -662,6 +662,29 @@ assert.deepEqual(pastFromToday.past.map((s) => s.id), [
   'two-weeks',
 ]);
 
+const syntheticHoldFutureLesson = splitSessionsAroundToday(
+  [
+    {
+      id: 'holiday:2026-09-16:14:00',
+      status: 'cancelled',
+      cycle: 2,
+      pack: 0,
+      date: '2026-09-16',
+      time: '14:00',
+      makeup: null,
+      note: '',
+      studentNote: '',
+      attachments: [],
+    },
+    { ...sess('deferred-cycle-2', '2026-09-23'), cycle: 2, pack: 0, time: '14:00' },
+  ],
+  '2026-09-17'
+);
+assert.ok(
+  syntheticHoldFutureLesson.upcoming.some((s) => s.id === 'holiday:2026-09-16:14:00'),
+  'synthetic holiday hold stays in upcoming while deferred lesson is still future'
+);
+
 const makeupSession = {
   ...sess('mk', '2026-09-09'),
   makeup: { date: '2026-10-01', time: '10:00', status: 'planned' },
@@ -747,7 +770,7 @@ assert.deepEqual(
 assert.equal(isSyntheticHolidayHold({ id: 'holiday:2026-09-16:14:00', status: 'cancelled' }), true);
 assert.equal(
   sessionLabel({ id: 'holiday:2026-09-16:14:00', status: 'cancelled', date: '2026-09-16', time: '14:00' }),
-  '휴강'
+  '휴강으로 인해 다음주로 대체'
 );
 
 const closureOnFirstLesson = {

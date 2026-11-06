@@ -193,6 +193,21 @@ export function isArchivedLesson(session, today = todayIso()) {
   return Boolean(date) && date < today;
 }
 
+/** Keep synthetic school-holiday hold rows visible in upcoming until that cycle's deferred lesson is past. */
+function syntheticHoldStaysUpcoming(sessions, hold, today) {
+  if (hold?.status !== 'cancelled' || !hold?.date || !String(hold.id || '').startsWith('holiday:')) return false;
+  if (!(hold.date < today)) return false;
+  const pack = hold.pack ?? 0;
+  const cycle = hold.cycle;
+  return (sessions || []).some(
+    (session) =>
+      session.status !== 'cancelled' &&
+      session.cycle === cycle &&
+      (session.pack ?? 0) === pack &&
+      !isArchivedLesson(session, today)
+  );
+}
+
 export function sortSessions(sessions) {
   return [...sessions].sort((a, b) => {
     const pa = a.pack ?? 0;
@@ -219,10 +234,16 @@ export function splitSessionsAroundToday(sessions, today = todayIso()) {
     return (a.pack ?? 0) - (b.pack ?? 0) || (a.cycle || 0) - (b.cycle || 0);
   };
   const upcoming = [...sessions]
-    .filter((session) => !isArchivedLesson(session, today))
+    .filter(
+      (session) =>
+        !isArchivedLesson(session, today) || syntheticHoldStaysUpcoming(sessions, session, today)
+    )
     .sort((a, b) => byDisplay(a, b, false));
   const past = [...sessions]
-    .filter((session) => isArchivedLesson(session, today))
+    .filter(
+      (session) =>
+        isArchivedLesson(session, today) && !syntheticHoldStaysUpcoming(sessions, session, today)
+    )
     .sort((a, b) => byDisplay(a, b, true));
   return { upcoming, past };
 }
@@ -806,7 +827,7 @@ export function isSyntheticHolidayHold(session) {
 }
 
 export function sessionLabel(session) {
-  if (isSyntheticHolidayHold(session)) return '휴강';
+  if (isSyntheticHolidayHold(session)) return '휴강으로 인해 다음주로 대체';
   if (session.status === 'cancelled') return '휴강으로 다음주로 이동';
   if (session.makeup?.status === 'done') return '보강 출석 (대체)';
   if (session.makeup?.status === 'absent') return '보강 불참';
