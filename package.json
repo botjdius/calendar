@@ -40,6 +40,8 @@
     "test:schedule": "node server/schedule.test.mjs",
     "test:checklist": "node scripts/test-lesson-checklist.mjs",
     "test:monthly-goals": "node scripts/test-monthly-goals.mjs",
+    "test:closure-remove": "node scripts/test-closure-remove.mjs",
+    "test:closure-tombstone": "node scripts/test-closure-tombstone.mjs",
     "test:instructor-save": "node scripts/test-instructor-save-reset.mjs",
     "dev": "node server/hub.mjs & expo start --lan",
     "android": "expo start --android",

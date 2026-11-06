@@ -7,6 +7,8 @@ import {
   signOut as fbSignOut,
 } from 'firebase/auth';
 import {
+  arrayRemove,
+  arrayUnion,
   collection,
   deleteDoc,
   doc,
@@ -39,11 +41,13 @@ import {
   mergeAnnouncements,
   mergeById,
   mergeCloudAccounts,
+  mergeClosures,
   mergeFeedback,
   dropRemovedFeedback,
   dropRemovedOpenSlots,
   dropRemovedRequests,
   mergeOpenSlots,
+  mergeRemovedClosureIds,
   mergeRemovedFeedback,
   mergeRemovedOpenSlots,
   mergeRemovedRequests,
@@ -63,7 +67,15 @@ import { normalizeMonthlyGoalsStore } from './monthlyGoals';
 import { externalizeStudents, isFilePointer, releaseFilePointer } from './fileCloud.mjs';
 import { auth, db } from './firebase';
 import { discoverHub, emptyBank, emptyShared, fetchBlob, hubAuth, isEphemeralHubUrl, mergeBanks, packBanks, probeHub, putBlob, rememberHubUrl, rememberPublicHubUrl, savedHubUrl, type SharedBlob } from './hub';
-import { feedbackInstructorPush, makeupInstructorPush, makeupStudentPush, notifyClosureStudents, notifyOpenSlotStudents, notifyRemotePush } from './pushNotify';
+import {
+  feedbackInstructorPush,
+  makeupInstructorPush,
+  makeupStudentPush,
+  notifyClosureRemoval,
+  notifyClosureStudents,
+  notifyOpenSlotStudents,
+  notifyRemotePush,
+} from './pushNotify';
 import { mergePushSubscriptions } from './pushStore';
 import { applyRemoveStudent, requestsForLiveStudents } from './studentRoster';
 import { sendCloudPush } from './cloudPush';
@@ -341,6 +353,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const removedFeedbackRef = useRef<string[]>([]);
   const removedRequestsRef = useRef<string[]>([]);
   const removedOpenSlotsRef = useRef<string[]>([]);
+  /** Firebase: ids deleted on any device; closure snapshots from Firestore are filtered so deletes cannot resurrect. */
+  const firebaseRemovedClosureIdsRef = useRef<string[]>([]);
   const firebaseOn = isFirebaseConfigured && !!auth && !!db;
 
   function setRequests(next: MakeupRequest[]) {
@@ -415,7 +429,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     );
     showFeedback(shared.feedback, uid, shared.accounts, shared.removedFeedback);
     if (!incomplete) {
-      const closuresNext = (shared.closures || []).map((c) => ({ ...c, scope: c.scope || 'all' }));
+      const tombstones = mergeRemovedClosureIds([], shared.removedClosureIds);
+      const closuresNext = mergeClosures([], shared.closures, true, tombstones).map((c) => ({ ...c, scope: c.scope || 'all' }));
       setStudents(live.map((s) => normalizeStudent(s)));
       setClosures(closuresNext);
       setOpenSlots(dropRemovedOpenSlots(shared.openSlots || [], shared.removedOpenSlots));
@@ -444,6 +459,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const removedFeedback = mergeRemovedFeedback(latest.removedFeedback, shared.removedFeedback);
     const removedRequests = mergeRemovedRequests(latest.removedRequests, shared.removedRequests);
     const removedOpenSlots = mergeRemovedOpenSlots(latest.removedOpenSlots, shared.removedOpenSlots);
+    const removedClosureIds = mergeRemovedClosureIds(latest.removedClosureIds, shared.removedClosureIds);
     rememberRemovedOpenSlots(removedOpenSlots);
     const requests = dropRemovedRequests(
       requestsForLiveStudents(
@@ -463,7 +479,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       version: incomplete ? latest.version : shared.version || latest.version,
       accounts: incomplete ? latest.accounts : shared.accounts || latest.accounts,
       students: incomplete ? latest.students : live.map((s) => normalizeStudent(s)),
-      closures: incomplete ? latest.closures : shared.closures || latest.closures,
+      closures: incomplete
+        ? latest.closures
+        : mergeClosures(latest.closures, shared.closures || [], true, removedClosureIds),
       openSlots: dropRemovedOpenSlots(
         incomplete ? latest.openSlots : Array.isArray(shared.openSlots) ? shared.openSlots : latest.openSlots,
         removedOpenSlots
@@ -474,6 +492,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       removedFeedback,
       removedRequests,
       removedOpenSlots,
+      removedClosureIds,
       ...(incomplete ? packBanks(latest.bank, latest.banks) : mergeBanks(shared, latest)),
       removedStudents: removed,
       pushSubscriptions: mergePushSubscriptions(latest.pushSubscriptions, shared.pushSubscriptions),
@@ -509,6 +528,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         removedFeedback: local.removedFeedback || [],
         removedRequests: local.removedRequests || [],
         removedOpenSlots: local.removedOpenSlots || [],
+        removedClosureIds: local.removedClosureIds || [],
         pushSubscriptions: local.pushSubscriptions || [],
       });
       if (writeGenRef.current !== gen) return;
@@ -568,6 +588,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       removedFeedback: local.removedFeedback || [],
       removedRequests: local.removedRequests || [],
       removedOpenSlots: local.removedOpenSlots || [],
+      removedClosureIds: local.removedClosureIds || [],
       pushSubscriptions: local.pushSubscriptions || [],
     });
   }
@@ -639,6 +660,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const keptRemovedFeedback = mergeRemovedFeedback(latest.removedFeedback, cloud.removedFeedback);
       const keptRemovedRequests = mergeRemovedRequests(latest.removedRequests, cloud.removedRequests);
       const keptRemovedOpenSlots = mergeRemovedOpenSlots(latest.removedOpenSlots, cloud.removedOpenSlots);
+      const keptRemovedClosureIds = mergeRemovedClosureIds(latest.removedClosureIds, cloud.removedClosureIds);
       const kept = dropRemovedRequests(
         mergeRequests(mergeRequests(latest.requests, requestsRef.current), cloud.requests),
         keptRemovedRequests
@@ -651,7 +673,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const keptRemovedStudents = mergeRemovedStudents(latest.removedStudents, cloud.removedStudents);
       // Pending local writes already bumped version; never merge stale cloud students over dirty state.
       const keptStudents = liveStudents(latest.students || [], keptRemovedStudents);
-      const keptClosures = latest.closures || [];
+      const keptClosures = mergeClosures(latest.closures, cloud.closures || [], incomingNewer || force, keptRemovedClosureIds);
       let keptOpenSlots = dropRemovedOpenSlots(
         mergeOpenSlots(latest.openSlots, cloud.openSlots || [], incomingNewer || force),
         keptRemovedOpenSlots
@@ -679,6 +701,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           removedFeedback: keptRemovedFeedback,
           removedRequests: keptRemovedRequests,
           removedOpenSlots: keptRemovedOpenSlots,
+          removedClosureIds: keptRemovedClosureIds,
           removedStudents: keptRemovedStudents,
         });
         setRequests(kept);
@@ -691,6 +714,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const removedStudents = mergeRemovedStudents(latest.removedStudents, cloud.removedStudents);
     const removedFeedback = mergeRemovedFeedback(latest.removedFeedback, cloud.removedFeedback);
     const removedOpenSlots = mergeRemovedOpenSlots(latest.removedOpenSlots, cloud.removedOpenSlots);
+    const removedClosureIds = mergeRemovedClosureIds(latest.removedClosureIds, cloud.removedClosureIds);
     let students = liveStudents(
       mergeStudents(latest.students, cloud.students || [], incomingNewer || force),
       removedStudents
@@ -715,7 +739,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ...latest,
       version: Math.max(cloud.version || 0, latest.version || 0, dataVersionRef.current || 0),
       students,
-      closures: mergeById(latest.closures, cloud.closures || [], incomingNewer || force),
+      closures: mergeClosures(latest.closures, cloud.closures || [], incomingNewer || force, removedClosureIds),
       openSlots: openSlotsNext,
       requests: dropRemovedRequests(
         mergeRequests(mergeRequests(latest.requests, requestsRef.current), cloud.requests),
@@ -728,6 +752,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ),
       removedFeedback,
       removedRequests: mergeRemovedRequests(latest.removedRequests, cloud.removedRequests),
+      removedClosureIds,
       removedOpenSlots,
       ...(incomingNewer || force ? mergeBanks(cloud, latest) : mergeBanks(latest, cloud)),
       accounts: mergeCloudAccounts(latest.accounts, cloud.accounts),
@@ -756,6 +781,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           removedFeedback: next.removedFeedback || [],
           removedRequests: next.removedRequests || [],
           removedOpenSlots: next.removedOpenSlots || [],
+          removedClosureIds: next.removedClosureIds || [],
         });
         applyShared(saved, uid);
         await cacheHubView(saved, uid);
@@ -810,6 +836,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           local.removedOpenSlots,
           mergeRemovedOpenSlots(next.removedOpenSlots, cloud?.removedOpenSlots)
         );
+        const removedClosureIds = mergeRemovedClosureIds(
+          local.removedClosureIds,
+          mergeRemovedClosureIds(next.removedClosureIds, cloud?.removedClosureIds)
+        );
         const incomingSlots = dropRemovedOpenSlots(
           mergeOpenSlots(
             mergeOpenSlots(local.openSlots, next.openSlots, (next.version || 0) >= (local.version || 0)),
@@ -837,6 +867,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               feedback: incomingFeedback,
               openSlots: incomingSlots,
               removedOpenSlots,
+              removedClosureIds,
             });
             setRequests(incomingRequests);
             setAnnouncements(incomingAnnouncements);
@@ -851,7 +882,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         if (hubAhead) {
           setStudents((next.students || []).map((s) => normalizeStudent(s)));
-          setClosures(next.closures);
+          setClosures(mergeClosures(local.closures, next.closures, true, removedClosureIds));
           applyPacked(next.bank, next.banks);
         }
         if (hubAhead || openSlotsChanged) {
@@ -863,7 +894,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         showFeedback(incomingFeedback, sessionUidRef.current, next.accounts?.length ? next.accounts : local.accounts);
         await cacheHubView(
           hubAhead
-            ? { ...next, requests: incomingRequests, announcements: incomingAnnouncements, feedback: incomingFeedback, openSlots: incomingSlots, removedOpenSlots }
+            ? {
+                ...next,
+                requests: incomingRequests,
+                announcements: incomingAnnouncements,
+                feedback: incomingFeedback,
+                openSlots: incomingSlots,
+                removedOpenSlots,
+                removedClosureIds,
+              }
             : {
                 ...local,
                 requests: incomingRequests,
@@ -871,6 +910,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 feedback: incomingFeedback,
                 openSlots: incomingSlots,
                 removedOpenSlots,
+                removedClosureIds,
                 version: local.version,
               },
           sessionUidRef.current
@@ -904,6 +944,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         removedFeedback: local.removedFeedback || [],
         removedRequests: local.removedRequests || [],
         removedOpenSlots: local.removedOpenSlots || [],
+        removedClosureIds: local.removedClosureIds || [],
         pushSubscriptions: local.pushSubscriptions || [],
       });
       applyShared(saved, uid);
@@ -929,17 +970,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           removedFeedback: local.removedFeedback || [],
           removedRequests: local.removedRequests || [],
           removedOpenSlots: local.removedOpenSlots || [],
+          removedClosureIds: local.removedClosureIds || [],
           pushSubscriptions: local.pushSubscriptions || [],
         });
         applyShared(saved, uid);
         await cacheHubView(saved, uid);
       } else {
         const removed = mergeRemovedStudents(local.removedStudents, next.removedStudents);
+        const removedClosureIds = mergeRemovedClosureIds(local.removedClosureIds, next.removedClosureIds);
         const merged: SharedBlob = {
           ...next,
           version: Math.max(localVersion, hubVersion),
           students: liveStudents(mergeStudents(local.students, next.students, false), removed),
-          closures: mergeById(local.closures, next.closures, false),
+          closures: mergeClosures(local.closures, next.closures, false, removedClosureIds),
+          removedClosureIds,
           openSlots: dropRemovedOpenSlots(
             mergeOpenSlots(local.openSlots, next.openSlots, false),
             mergeRemovedOpenSlots(local.removedOpenSlots, next.removedOpenSlots)
@@ -1080,13 +1124,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!firebaseOn || !user || !db) return;
 
+    const dropRemovedClosureIds = (list: Closure[]) => {
+      const drop = new Set(firebaseRemovedClosureIdsRef.current);
+      return list.filter((c) => c?.id && !drop.has(c.id));
+    };
+
+    void (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'studio', 'meta'));
+        const ids = (snap.data()?.removedClosureIds as string[] | undefined)?.filter(Boolean) || [];
+        firebaseRemovedClosureIdsRef.current = mergeRemovedClosureIds(firebaseRemovedClosureIdsRef.current, ids);
+      } catch {
+        // ignore
+      }
+    })();
+
     const unsubs: Array<() => void> = [];
+    unsubs.push(
+      onSnapshot(doc(db, 'studio', 'meta'), (snap) => {
+        const ids = (snap.data()?.removedClosureIds as string[] | undefined)?.filter(Boolean) || [];
+        firebaseRemovedClosureIdsRef.current = mergeRemovedClosureIds(firebaseRemovedClosureIdsRef.current, ids);
+        setClosures((prev) => dropRemovedClosureIds(prev));
+      })
+    );
     if (user.role === 'instructor') {
       unsubs.push(onSnapshot(collection(db, 'students'), (s) => {
         setStudents(s.docs.map((d) => d.data() as Student));
       }));
       unsubs.push(onSnapshot(collection(db, 'closures'), (s) => {
-        setClosures(s.docs.map((d) => d.data() as Closure));
+        setClosures(dropRemovedClosureIds(s.docs.map((d) => d.data() as Closure)));
       }));
     } else {
       unsubs.push(
@@ -1116,7 +1182,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           (s) => {
             setClosures((prev) => {
               const mine = prev.filter((c) => c.scope === 'student');
-              const pub = s.docs.map((d) => d.data() as Closure);
+              const pub = dropRemovedClosureIds(s.docs.map((d) => d.data() as Closure));
               return [...pub, ...mine.filter((m) => !pub.some((p) => p.id === m.id))];
             });
           }
@@ -1129,7 +1195,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             (s) => {
               setClosures((prev) => {
                 const pub = prev.filter((c) => c.scope === 'all');
-                const mine = s.docs.map((d) => d.data() as Closure);
+                const mine = dropRemovedClosureIds(s.docs.map((d) => d.data() as Closure));
                 return [...pub, ...mine];
               });
             }
@@ -1191,6 +1257,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         blob.removedOpenSlots,
         mergeRemovedOpenSlots(cloud?.removedOpenSlots, patch.removedOpenSlots)
       );
+      const removedClosureIds = mergeRemovedClosureIds(
+        blob.removedClosureIds,
+        mergeRemovedClosureIds(cloud?.removedClosureIds, patch.removedClosureIds)
+      );
       const incomingNewer = (cloud?.version || 0) > (blob.version || dataVersionRef.current || 0);
       let mergedStudents = cloud ? mergeStudents(blob.students, cloud.students, incomingNewer) : blob.students;
       mergedStudents = liveStudents(mergedStudents, removedStudents);
@@ -1216,7 +1286,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...blob,
         version: Math.max(blob.version || 0, cloud?.version || 0, dataVersionRef.current || 0),
         students: mergedStudents,
-        closures: cloud ? mergeById(blob.closures, cloud.closures, incomingNewer) : blob.closures,
+        closures: cloud
+          ? mergeClosures(blob.closures, cloud.closures, incomingNewer, removedClosureIds)
+          : blob.closures,
         openSlots: mergedSlots,
         requests: dropRemovedRequests(
           cloud ? mergeRequests(blob.requests, cloud.requests) : blob.requests,
@@ -1232,6 +1304,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         removedFeedback,
         removedRequests,
         removedOpenSlots,
+        removedClosureIds,
         ...(cloud ? mergeBanks(incomingNewer ? cloud : blob, incomingNewer ? blob : cloud) : packBanks(blob.bank, blob.banks)),
         accounts: cloud ? mergeCloudAccounts(blob.accounts, cloud.accounts) : blob.accounts,
         removedStudents,
@@ -1250,7 +1323,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             : base.students,
           removedStudents
         ),
-        closures: patch.closures ?? base.closures,
+        closures:
+          patch.closures !== undefined
+            ? mergeClosures(base.closures, patch.closures, true, mergeRemovedClosureIds(base.removedClosureIds, patch.removedClosureIds))
+            : base.closures,
+        removedClosureIds: mergeRemovedClosureIds(base.removedClosureIds, patch.removedClosureIds),
         openSlots: dropRemovedOpenSlots(
           patch.openSlots !== undefined
             ? mergeOpenSlots(base.openSlots, patch.openSlots, true)
@@ -1534,12 +1611,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await persistShared({
           accounts: [...shared.accounts.filter((a) => a.role !== 'instructor'), nextAcc],
           students: mergeById(shared.students, cloud?.students || [], true),
-          closures: mergeById(shared.closures, cloud?.closures || [], true),
+          closures: mergeClosures(
+            shared.closures,
+            cloud?.closures || [],
+            true,
+            mergeRemovedClosureIds(shared.removedClosureIds, cloud?.removedClosureIds)
+          ),
           openSlots: dropRemovedOpenSlots(
             mergeOpenSlots(shared.openSlots, cloud?.openSlots || [], true),
             mergeRemovedOpenSlots(shared.removedOpenSlots, cloud?.removedOpenSlots)
           ),
           removedOpenSlots: mergeRemovedOpenSlots(shared.removedOpenSlots, cloud?.removedOpenSlots),
+          removedClosureIds: mergeRemovedClosureIds(shared.removedClosureIds, cloud?.removedClosureIds),
           requests: mergeRequests(shared.requests, cloud?.requests),
           announcements: mergeAnnouncements(shared.announcements, cloud?.announcements || [], true),
           feedback: mergeFeedback(shared.feedback, cloud?.feedback),
@@ -2245,6 +2328,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const studentsNext = applyAllHolidays(roster, [item, ...shared.closures]);
       if (firebaseOn) {
         await setDoc(doc(db!, 'closures', item.id), item);
+        await updateDoc(doc(db!, 'studio', 'meta'), { removedClosureIds: arrayRemove(item.id) });
         for (const st of studentsNext) {
           await updateDoc(doc(db!, 'students', st.id), { sessions: st.sessions });
         }
@@ -2256,12 +2340,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
     async removeClosure(id) {
       requireInstructor();
+      const clean = String(id || '').trim();
+      if (!clean) return;
+      const shared = await currentShared();
+      const closureList = firebaseOn ? closures : shared.closures;
+      const removed = closureList.find((c) => c.id === clean);
+      const remaining = closureList.filter((c) => c.id !== clean);
+      const roster = (await currentStudents()).map(normalizeStudent);
+      const studentsNext = applyAllHolidays(roster, remaining);
       if (firebaseOn) {
-        await deleteDoc(doc(db!, 'closures', id));
+        await deleteDoc(doc(db!, 'closures', clean));
+        await setDoc(
+          doc(db!, 'studio', 'meta'),
+          { removedClosureIds: arrayUnion(clean) },
+          { merge: true }
+        );
+        for (const st of studentsNext) {
+          await updateDoc(doc(db!, 'students', st.id), { sessions: st.sessions });
+        }
+        if (removed) notifyClosureRemoval(removed, roster);
         return;
       }
-      const shared = await currentShared();
-      await persistShared({ closures: shared.closures.filter((c) => c.id !== id) });
+      await persistShared({ closures: remaining, students: studentsNext, removedClosureIds: [clean] });
+      if (removed) notifyClosureRemoval(removed, roster);
     },
     async addOpenSlot(input) {
       requireInstructor();

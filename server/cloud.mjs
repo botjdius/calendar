@@ -133,6 +133,17 @@ export function mergeRemovedFeedback(current, incoming) {
 
 export const mergeRemovedRequests = mergeRemovedFeedback;
 export const mergeRemovedOpenSlots = mergeRemovedFeedback;
+export const mergeRemovedClosureIds = mergeRemovedFeedback;
+
+export function dropRemovedClosures(closures, removed) {
+  const drop = new Set(mergeRemovedClosureIds([], removed));
+  return (closures || []).filter((item) => item?.id && !drop.has(item.id));
+}
+
+export function mergeClosures(current, incoming, incomingNewer, removedClosureIds) {
+  const merged = mergeById(current, incoming, incomingNewer);
+  return dropRemovedClosures(merged, removedClosureIds);
+}
 
 export function dropRemovedFeedback(items, removed) {
   const drop = new Set(mergeRemovedFeedback([], removed));
@@ -470,17 +481,22 @@ export function joinCodeBlocked(code, students, removed) {
 export function mergeStudio(current, incoming) {
   if (!current) {
     const removedStudents = mergeRemovedStudents([], incoming.removedStudents);
+    const removedClosureIds = mergeRemovedClosureIds([], incoming.removedClosureIds);
     const students = liveStudents(incoming.students, removedStudents);
     const liveIds = new Set(students.map((student) => student.id));
     return {
       ...incoming,
       students,
       removedStudents,
+      removedClosureIds,
       accounts: (incoming.accounts || []).filter(
         (account) => account.role !== 'student' || !isStudentRemoved(removedStudents, account)
       ),
-      closures: (incoming.closures || []).filter(
-        (item) => item.scope !== 'student' || (item.studentId && liveIds.has(item.studentId))
+      closures: dropRemovedClosures(
+        (incoming.closures || []).filter(
+          (item) => item.scope !== 'student' || (item.studentId && liveIds.has(item.studentId))
+        ),
+        removedClosureIds
       ),
       requests: dropRemovedRequests(
         (incoming.requests || []).filter((item) => liveIds.has(item.studentId)),
@@ -508,10 +524,11 @@ export function mergeStudio(current, incoming) {
     );
   }
   const removedOpenSlots = mergeRemovedOpenSlots(current.removedOpenSlots, incoming.removedOpenSlots);
+  const removedClosureIds = mergeRemovedClosureIds(current.removedClosureIds, incoming.removedClosureIds);
   return {
     version: Math.max(current.version || 0, incoming.version || 0),
     students,
-    closures: mergeById(current.closures, incoming.closures, incomingNewer).filter(
+    closures: mergeClosures(current.closures, incoming.closures, incomingNewer, removedClosureIds).filter(
       (item) => item.scope !== 'student' || (item.studentId && liveIds.has(item.studentId))
     ),
     openSlots: dropRemovedOpenSlots(
@@ -525,6 +542,7 @@ export function mergeStudio(current, incoming) {
     announcements: mergeAnnouncements(current.announcements, incoming.announcements || [], incomingNewer),
     removedFeedback: mergeRemovedFeedback(current.removedFeedback, incoming.removedFeedback),
     removedRequests: mergeRemovedRequests(current.removedRequests, incoming.removedRequests),
+    removedClosureIds,
     removedOpenSlots,
     feedback: dropRemovedFeedback(
       mergeFeedback(current.feedback, incoming.feedback),
@@ -542,7 +560,8 @@ export function studioFromState(state) {
   return {
     version: state.version || 0,
     students: state.students || [],
-    closures: state.closures || [],
+    removedClosureIds: mergeRemovedClosureIds([], state.removedClosureIds),
+    closures: dropRemovedClosures(state.closures || [], state.removedClosureIds),
     openSlots: dropRemovedOpenSlots(state.openSlots, state.removedOpenSlots),
     requests: dropRemovedRequests(state.requests, state.removedRequests),
     announcements: state.announcements || [],
@@ -574,10 +593,14 @@ export function studioFromState(state) {
 
 function parseStudio(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  const removedClosureIds = Array.isArray(data.removedClosureIds)
+    ? data.removedClosureIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
   return {
     version: data.version || 0,
     students: Array.isArray(data.students) ? data.students : [],
-    closures: Array.isArray(data.closures) ? data.closures : [],
+    removedClosureIds,
+    closures: dropRemovedClosures(Array.isArray(data.closures) ? data.closures : [], removedClosureIds),
     openSlots: dropRemovedOpenSlots(
       Array.isArray(data.openSlots) ? data.openSlots : [],
       Array.isArray(data.removedOpenSlots) ? data.removedOpenSlots : []

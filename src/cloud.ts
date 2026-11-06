@@ -159,6 +159,23 @@ export function mergeRemovedFeedback(current?: string[], incoming?: string[]): s
 
 export const mergeRemovedRequests = mergeRemovedFeedback;
 export const mergeRemovedOpenSlots = mergeRemovedFeedback;
+export const mergeRemovedClosureIds = mergeRemovedFeedback;
+
+export function dropRemovedClosures<T extends { id: string }>(closures?: T[], removed?: string[]): T[] {
+  const drop = new Set(mergeRemovedClosureIds([], removed));
+  return (closures || []).filter((item) => item?.id && !drop.has(item.id));
+}
+
+/** Merge closure rows then strip ids tombstoned in `removedClosureIds` (any side). */
+export function mergeClosures<T extends { id: string }>(
+  current: T[] | undefined,
+  incoming: T[] | undefined,
+  incomingNewer: boolean,
+  removedClosureIds?: string[]
+): T[] {
+  const merged = mergeById(current, incoming, incomingNewer);
+  return dropRemovedClosures(merged, removedClosureIds);
+}
 
 export function dropRemovedFeedback(
   items?: AnonymousFeedback[] | unknown[],
@@ -572,6 +589,7 @@ function durableHubUrl(url?: string) {
 export function mergeStudio(current: StudioCloud | null, incoming: StudioCloud): StudioCloud {
   if (!current) {
     const removedStudents = mergeRemovedStudents([], incoming.removedStudents);
+    const removedClosureIds = mergeRemovedClosureIds([], incoming.removedClosureIds);
     const students = liveStudents(incoming.students, removedStudents);
     const liveIds = new Set(students.map((student) => student.id));
     return {
@@ -581,8 +599,12 @@ export function mergeStudio(current: StudioCloud | null, incoming: StudioCloud):
       accounts: (incoming.accounts || []).filter(
         (account) => account.role !== 'student' || !isStudentRemoved(removedStudents, account)
       ),
-      closures: (incoming.closures || []).filter(
-        (item) => item.scope !== 'student' || (item.studentId && liveIds.has(item.studentId))
+      removedClosureIds,
+      closures: dropRemovedClosures(
+        (incoming.closures || []).filter(
+          (item) => item.scope !== 'student' || (item.studentId && liveIds.has(item.studentId))
+        ),
+        removedClosureIds
       ),
       requests: dropRemovedRequests(
         (incoming.requests || []).filter((item) => liveIds.has(item.studentId)),
@@ -610,10 +632,11 @@ export function mergeStudio(current: StudioCloud | null, incoming: StudioCloud):
     accounts = accounts.filter((account) => account.role !== 'student' || !account.studentId || liveIds.has(account.studentId));
   }
   const removedOpenSlots = mergeRemovedOpenSlots(current.removedOpenSlots, incoming.removedOpenSlots);
+  const removedClosureIds = mergeRemovedClosureIds(current.removedClosureIds, incoming.removedClosureIds);
   return {
     version: Math.max(current.version || 0, incoming.version || 0),
     students,
-    closures: mergeById(current.closures, incoming.closures, incomingNewer).filter(
+    closures: mergeClosures(current.closures, incoming.closures, incomingNewer, removedClosureIds).filter(
       (item) => item.scope !== 'student' || (item.studentId && liveIds.has(item.studentId))
     ),
     openSlots: dropRemovedOpenSlots(
@@ -627,6 +650,7 @@ export function mergeStudio(current: StudioCloud | null, incoming: StudioCloud):
     announcements: mergeAnnouncements(current.announcements, incoming.announcements || [], incomingNewer),
     removedFeedback: mergeRemovedFeedback(current.removedFeedback, incoming.removedFeedback),
     removedRequests: mergeRemovedRequests(current.removedRequests, incoming.removedRequests),
+    removedClosureIds,
     removedOpenSlots,
     feedback: dropRemovedFeedback(
       mergeFeedback(current.feedback, incoming.feedback),
@@ -668,7 +692,8 @@ export async function studioFromShared(shared: SharedBlob): Promise<StudioCloud>
   return {
     version: shared.version || 0,
     students: shared.students || [],
-    closures: shared.closures || [],
+    removedClosureIds: mergeRemovedClosureIds([], shared.removedClosureIds),
+    closures: dropRemovedClosures(shared.closures || [], shared.removedClosureIds),
     openSlots: dropRemovedOpenSlots(shared.openSlots, shared.removedOpenSlots),
     requests: dropRemovedRequests(shared.requests, shared.removedRequests),
     announcements: shared.announcements || [],
@@ -724,12 +749,16 @@ async function timed(url: string, init?: RequestInit, ms = 8000) {
 function parseStudio(data: unknown): StudioCloud | null {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
   const body = data as Partial<StudioCloud> & { students?: unknown; requests?: unknown };
+  const removedClosureIds = Array.isArray(body.removedClosureIds)
+    ? body.removedClosureIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
   return {
     ...emptyShared(),
     ...body,
     accounts: Array.isArray(body.accounts) ? body.accounts : [],
     students: Array.isArray(body.students) ? body.students : [],
-    closures: Array.isArray(body.closures) ? body.closures : [],
+    removedClosureIds,
+    closures: dropRemovedClosures(Array.isArray(body.closures) ? body.closures : [], removedClosureIds),
     openSlots: dropRemovedOpenSlots(
       Array.isArray(body.openSlots) ? body.openSlots : [],
       Array.isArray(body.removedOpenSlots) ? body.removedOpenSlots : []

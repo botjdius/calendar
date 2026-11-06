@@ -108,6 +108,37 @@ export function notifyClosureStudents(
   }
 }
 
+/** Same Web Push `tag` as add (`closure-${id}`) so clients replace the earlier 휴강 알림. */
+export function notifyClosureRemoval(
+  closure: Pick<Closure, 'id' | 'date' | 'endDate' | 'time' | 'reason'> & { scope?: Closure['scope']; studentId?: string },
+  students: Pick<Student, 'id' | 'time' | 'sessions' | 'linkedUid'>[]
+) {
+  const full: Closure = {
+    id: closure.id,
+    date: closure.date,
+    endDate: closure.endDate,
+    time: closure.time,
+    reason: String(closure.reason || ''),
+    scope: closure.scope ?? 'all',
+    ...(closure.studentId ? { studentId: closure.studentId } : {}),
+  };
+  const eligible = studentsAffectedByClosure(students, full);
+  if (!eligible.length) return;
+  const when = closureWhenLabel(closure);
+  const tag = `closure-${closure.id}`;
+  for (const student of eligible) {
+    void notifyCloudPush({
+      audience: 'student',
+      studentId: student.id,
+      uid: student.linkedUid || undefined,
+      title: '휴강 취소',
+      body: when ? `${when} 휴강이 취소되었습니다.` : '등록했던 휴강이 취소되었습니다.',
+      url: '/',
+      tag,
+    });
+  }
+}
+
 export function notifyRemotePush(
   payload: Parameters<typeof notifyCloudPush>[0]
 ) {

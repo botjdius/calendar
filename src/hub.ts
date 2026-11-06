@@ -22,6 +22,8 @@ export type SharedBlob = {
   removedFeedback?: string[];
   removedRequests?: string[];
   removedOpenSlots?: string[];
+  /** Closure ids removed on a newer device; merged so stale snapshots cannot resurrect them. */
+  removedClosureIds?: string[];
   bank: BankAccount;
   banks?: BankAccount[];
   hubPublicUrl?: string;
@@ -41,6 +43,7 @@ export const emptyShared = (): SharedBlob => ({
   removedFeedback: [],
   removedRequests: [],
   removedOpenSlots: [],
+  removedClosureIds: [],
   bank: emptyBank(),
   banks: [],
   removedStudents: [],
