@@ -202,16 +202,99 @@ function bytesFromB64(raw: string) {
   return Uint8Array.from(Buffer.from(data, 'base64'));
 }
 
+function isAndroidWeb() {
+  return (
+    Platform.OS === 'android' ||
+    (Platform.OS === 'web' && typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent))
+  );
+}
+
+function mimeForFile(file: SessionFile, href: string) {
+  if (file.mime && file.mime !== 'application/octet-stream') return file.mime;
+  if (href.startsWith('data:')) {
+    const cut = href.indexOf(';');
+    if (cut > 5) return href.slice(5, cut) || 'application/octet-stream';
+  }
+  const name = String(file.name || '').toLowerCase();
+  if (name.endsWith('.pdf')) return 'application/pdf';
+  if (name.endsWith('.png')) return 'image/png';
+  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+  if (name.endsWith('.gif')) return 'image/gif';
+  if (name.endsWith('.webp')) return 'image/webp';
+  if (name.endsWith('.mp3')) return 'audio/mpeg';
+  if (name.endsWith('.wav')) return 'audio/wav';
+  if (name.endsWith('.mp4')) return 'video/mp4';
+  if (name.endsWith('.txt')) return 'text/plain';
+  if (name.endsWith('.zip')) return 'application/zip';
+  return file.mime || 'application/octet-stream';
+}
+
+function safeDownloadName(name?: string) {
+  const raw = String(name || '파일').replace(/[\\/:*?"<>|]/g, '_').trim();
+  return raw || '파일';
+}
+
 function webHref(file: SessionFile, href: string) {
   if (!href.startsWith('data:') || typeof URL === 'undefined' || typeof Blob === 'undefined') return href;
-  const mime = file.mime || href.slice(5, href.indexOf(';')) || 'application/octet-stream';
+  const mime = mimeForFile(file, href);
   const blob = new Blob([bytesFromB64(href)], { type: mime });
   return URL.createObjectURL(blob);
 }
 
+async function blobFromHref(file: SessionFile, href: string) {
+  const mime = mimeForFile(file, href);
+  if (href.startsWith('blob:')) {
+    const res = await fetch(href);
+    const blob = await res.blob();
+    if (blob.type && blob.type !== 'application/octet-stream') return blob;
+    return new Blob([await blob.arrayBuffer()], { type: mime });
+  }
+  if (href.startsWith('data:')) return new Blob([bytesFromB64(href)], { type: mime });
+  return null;
+}
+
+function clickDownload(href: string, name?: string) {
+  const link = document.createElement('a');
+  link.href = href;
+  if (name) link.download = name;
+  else link.target = '_blank';
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+async function saveWebFile(file: SessionFile, href: string) {
+  const name = safeDownloadName(file.name);
+  const blob = await blobFromHref(file, href);
+  if (blob) {
+    const typed =
+      blob.type && blob.type !== 'application/octet-stream'
+        ? blob
+        : new Blob([await blob.arrayBuffer()], { type: mimeForFile(file, href) });
+    const webFile =
+      typeof File !== 'undefined' ? new File([typed], name, { type: typed.type || 'application/octet-stream' }) : null;
+    const nav = typeof navigator !== 'undefined' ? navigator : null;
+    if (webFile && typeof nav?.canShare === 'function' && nav.canShare({ files: [webFile] })) {
+      try {
+        await nav.share({ files: [webFile], title: name });
+        return;
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return;
+      }
+    }
+    const url = URL.createObjectURL(typed);
+    clickDownload(url, name);
+    window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+    return;
+  }
+  clickDownload(href);
+}
+
 export async function openSessionFile(file: SessionFile) {
+  const android = isAndroidWeb();
   const popup =
-    Platform.OS === 'web' && typeof window !== 'undefined' ? window.open('', '_blank') : null;
+    Platform.OS === 'web' && typeof window !== 'undefined' && !android ? window.open('', '_blank') : null;
   if (popup) {
     try {
       popup.document.write(
@@ -232,18 +315,16 @@ export async function openSessionFile(file: SessionFile) {
     }
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       href = webHref(file, href);
+      if (android) {
+        popup?.close();
+        await saveWebFile(file, href);
+        return;
+      }
       if (popup && !popup.closed) {
         popup.location.replace(href);
         return;
       }
-      const link = document.createElement('a');
-      link.href = href;
-      link.download = file.name || '파일';
-      link.target = '_blank';
-      link.rel = 'noopener';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      clickDownload(href, file.name || '파일');
       return;
     }
     popup?.close();

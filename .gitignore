@@ -35,6 +35,7 @@ yarn-error.*
 .env*.local
 
 # local deploy/tooling state
+.firebase/
 .netlify/
 .wrangler/
 .dev.vars
